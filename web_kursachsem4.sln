@@ -4,6 +4,9 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "web_kursachsem4.Web", "web_kursachsem4.Web\web_kursachsem4.Web.csproj", "{36B85FE4-7BB4-42B5-86AA-FB36786CDB17}"
+	ProjectSection(ProjectDependencies) = postProject
+		{80CF4829-B8E4-4EE6-8142-2B99E0779628} = {80CF4829-B8E4-4EE6-8142-2B99E0779628}
+	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "web_kursachsem4.Data", "web_kursachsem4.Data\web_kursachsem4.Data.csproj", "{80CF4829-B8E4-4EE6-8142-2B99E0779628}"
 EndProject
@@ -72,5 +75,8 @@ Global
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {2DCB62CF-783B-4D35-B0E8-1338BBE7E6A0}
 	EndGlobalSection
 EndGlobal
