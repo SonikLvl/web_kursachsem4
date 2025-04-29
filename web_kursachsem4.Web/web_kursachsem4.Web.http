@@ -1,6 +1,6 @@
 @web_kursachsem4.Web_HostAddress = http://localhost:5222
 
-GET {{web_kursachsem4.Web_HostAddress}}/api/test/
+GET {{web_kursachsem4.Web_HostAddress}}/api/users/1
 Accept: application/json
 
 ###

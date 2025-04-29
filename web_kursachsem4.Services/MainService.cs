@@ -1,117 +1,209 @@
 ﻿using System;
 using web_kursachsem4.Data.Models;
-using web_kursachsem4.Data;
+using web_kursachsem4.Data; // Переконайтесь, що тут правильний namespace для MainDbContext
 using System.Linq;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore;
 using System.Threading.Tasks;
-using Microsoft.Data.SqlClient;
-using Npgsql;
+//using Microsoft.Data.SqlClient; // Ймовірно, не потрібен при використанні EF Core абстракції
+//using Npgsql; // Ймовірно, не потрібен при використанні EF Core абстракції
+using web_kursachsem4.Exceptions; // Додайте using для вашого кастомного Exception
+using BCrypt.Net;
 
 namespace web_kursachsem4.Services
 {
-    public class MainService : IMainService
-    {
-        private readonly mainDBcontext _db;
-        public MainService(mainDBcontext db) {
-            _db = db;
-        }
-        public void AddUser(User user)
-        {
-            _db.Add(user);
-            _db.SaveChanges();
-        }
-
-        public void DeleteUser(int userId)
-        {
-            var userToDelete = _db.Users.Find(userId);
-            var scoreToDelete = _db.Scores.Find(userId);
-            var lvlToDelete = _db.Levels.Find(userId);
-
-            if(userToDelete != null && scoreToDelete != null && lvlToDelete != null)
-            {
-                _db.Remove(userToDelete);
-                //_db.Remove(scoreToDelete);
-                //_db.Remove(lvlToDelete);
-            }
-
-            throw new InvalidProgramException("User doesnt exit - cannot delete it.");
-        }
-
-        public void EditLevel(int userId, List<bool> lvl)
-        {
-            var lvlToUpdate = _db.Levels.Find(userId);
-            lvlToUpdate.CompletedLevels = lvl;
-            _db.SaveChanges();
-        }
-
-
-        public void EditScore(int userId, int score) //?????
-        {
-            var scoreToUpdate = _db.Scores.Find(userId);
-            scoreToUpdate.ScoreValue = score;
-            _db.SaveChanges();
-        }
-
-        public List<bool> GetLevel(int userId)
-        {
-            return _db.Levels.Find(userId).CompletedLevels;
-        }
-
-        public int GetScore(int userId)
-        {
-            return _db.Scores.Find(userId).ScoreValue;
-        }
-
-        public string GetUsername(int userId)
-        {
-            return _db.Users.Find(userId).UserName;
-        }
-        public string GetPassword(int userId)
-        {
-            return _db.Users.Find(userId).Password;
-        }
-
-
-        /*public async Task<string> GetAsync(int id)
-        {
-            //var username = await _db.User.FromSqlRaw($"SELECT username FROM public.users \r\n WHERE userid=@id", new NpgsqlParameter<Int32>("id", id)).FirstOrDefaultAsync();//  as us \r\n WHERE us.userid=@id", new NpgsqlParameter<Int32>("id", id)
-            /*var username = await _db.Database
-            .SqlQuery<string>($"""
-                            SELECT "BlogId" AS "x" FROM "Blogs"
-                            """)
-            .Where(x => x.Use.)
-            .ToListAsync();
-            var username = _db.Users.Find(id).UserName;
-
-            if (username == null)
-            {
-                return null;
-            }
-            return username;
-            return new GetUsername
-            {
-                Id = username.userid,
-                username = username.username
-            };
-    }*/
-    }
-
+    // Інтерфейс з асинхронними методами
     public interface IMainService
     {
-        //Task<string> GetAsync(int id);
-        public string GetUsername(int userId);
-        public string GetPassword(int userId);
-        public void AddUser(User user);
-        //public void EditUser(User user);
-        public void DeleteUser(int userId);
+        Task<string?> GetUsernameAsync(int userId); // Може повернути null, якщо не знайдено
+        Task<User> AddUserAsync(User user); // Повертаємо доданого користувача (з ID)
+        Task DeleteUserAsync(int userId);
 
-        public void EditScore(int userId, int score);
-        public int GetScore(int userId);
+        Task<int?> GetScoreAsync(int userId); // Може повернути null
+        Task EditScoreAsync(int userId, int score);
+
+        Task<List<bool>?> GetLevelAsync(int userId); // Може повернути null
+        Task EditLevelAsync(int userId, List<bool> lvl);
+        Task<User?> AuthenticateUserAsync(string username, string password); // Повертає User при успіху, null при невдачі
+    }
+
+    // Реалізація сервісу з async/await та обробкою помилок
+    public class MainService : IMainService
+    {
+        // Використовуйте стандартне іменування PascalCase для класів
+        private readonly mainDBcontext _db;
+
+        // Використання primary constructor (C# 12 / .NET 8+)
+        public MainService(mainDBcontext db)
+        {
+            _db = db ?? throw new ArgumentNullException(nameof(db));
+        }
+
+        // --- User Methods ---
+        public async Task<User?> AuthenticateUserAsync(string username, string password)
+        {
+            if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
+            {
+                return null; // Неправильні вхідні дані
+            }
+
+            // 1. Знаходимо користувача за ім'ям (регистрозалежне порівняння за замовчуванням)
+            // Якщо потрібне регістронезалежне: u.UserName.ToLower() == username.ToLower()
+            var user = await _db.Users.FirstOrDefaultAsync(u => u.UserName == username);
+
+            // 2. Перевіряємо, чи користувача знайдено
+            if (user == null)
+            {
+                // Користувача не знайдено
+                return null;
+            }
+
+            // 3. Перевіряємо пароль за допомогою BCrypt.Verify
+            //    user.Password - це збережений хеш з бази даних
+            //    password - це простий пароль, введений користувачем під час логіну
+            bool isPasswordValid = BCrypt.Net.BCrypt.Verify(password, user.Password);
+
+            if (isPasswordValid)
+            {
+                // 4. Пароль правильний - повертаємо дані користувача
+                return user;
+            }
+            else
+            {
+                // 5. Пароль неправильний
+                return null;
+            }
+        }
+
+        public async Task<User> AddUserAsync(User user)
+        {
+            if (user == null)
+            {
+                throw new ArgumentNullException(nameof(user));
+            }
+            // перевірка на унікальність UserName перед додаванням
+            if (await _db.Users.AnyAsync(u => u.UserName == user.UserName))
+            {
+                throw new InvalidOperationException($"User with username '{user.UserName}' already exists.");
+            }
+
+            // --- Хешування Пароля ---
+            // BCrypt.HashPassword автоматично генерує сіль (salt) і включає її в хеш
+            user.Password = BCrypt.Net.BCrypt.HashPassword(user.Password);
 
 
-        public void EditLevel(int userId, List<bool> lvl);
-        public List<bool> GetLevel(int userId);
+            _db.Users.Add(user); // EF Core автоматично відстежує зміни
+            await _db.SaveChangesAsync();
+            // Після SaveChanges, user матиме згенерований ID (якщо він генерується БД)
+            return user;
+        }
 
+        public async Task DeleteUserAsync(int userId)
+        {
+            var userToDelete = await _db.Users.FindAsync(userId);
+
+            if (userToDelete == null)
+            {
+                throw new NotFoundException(nameof(User), userId);
+            }
+
+            // Припущення: Score та Level мають UserId як PK або налаштоване каскадне видалення.
+            // Якщо UserId НЕ є PK для Score/Level, потрібно знайти їх інакше:
+            // var scoreToDelete = await _db.Scores.FirstOrDefaultAsync(s => s.UserId == userId);
+            // var lvlToDelete = await _db.Levels.FirstOrDefaultAsync(l => l.UserId == userId);
+            //
+            // // Якщо каскадне видалення не налаштоване, видаляємо залежні сутності вручну:
+            // if (scoreToDelete != null) _db.Scores.Remove(scoreToDelete);
+            // if (lvlToDelete != null) _db.Levels.Remove(lvlToDelete);
+
+            _db.Users.Remove(userToDelete); // Видаляємо користувача
+            await _db.SaveChangesAsync(); // Зберігаємо зміни (включно з каскадними, якщо налаштовані)
+        }
+
+        // Оптимізовано: вибираємо тільки UserName
+        public async Task<string?> GetUsernameAsync(int userId)
+        {
+            // FindAsync завантажує всю сутність. Якщо потрібне тільки одне поле, краще так:
+            var username = await _db.Users
+                .Where(u => u.UserId == userId) // Припускаючи, що поле називається UserId
+                .Select(u => u.UserName)
+                .FirstOrDefaultAsync();
+
+            // FirstOrDefaultAsync поверне null, якщо користувача не знайдено
+            return username;
+            // Якщо потрібно кидати виняток, коли не знайдено:
+            // if (username == null)
+            // {
+            //     throw new NotFoundException(nameof(User), userId);
+            // }
+            // return username;
+        }
+
+        // --- Score Methods ---
+
+        public async Task EditScoreAsync(int userId, int score)
+        {
+            var scoreToUpdate = await _db.Scores.FindAsync(userId); // Припускаємо userId є PK для Score
+
+            if (scoreToUpdate == null)
+            {
+                // Якщо Score пов'язаний з User, можливо, краще перевірити існування User
+                var userExists = await _db.Users.AnyAsync(u => u.UserId == userId);
+                if (!userExists) throw new NotFoundException(nameof(User), userId);
+                // Якщо юзер є, а Score немає - можливо, створити новий запис Score? Або кинути інший виняток.
+                // Наразі кидаємо NotFoundException для Score
+                throw new NotFoundException(nameof(Score), userId);
+            }
+
+            scoreToUpdate.ScoreValue = score; // Припускаємо, що поле називається ScoreValue
+            // _db.Update(scoreToUpdate); // Явно викликати Update зазвичай не потрібно, EF Core відстежує зміни
+            await _db.SaveChangesAsync();
+        }
+
+        public async Task<int?> GetScoreAsync(int userId)
+        {
+            // Оптимізація через Select, якщо потрібне тільки значення
+            var scoreValue = await _db.Scores
+                .Where(s => s.UserId == userId) // Припускаючи userId - це ключ або FK
+                .Select(s => (int?)s.ScoreValue) // Проектуємо в nullable int
+                .FirstOrDefaultAsync();
+
+            // Поверне null, якщо запис Score не знайдено
+            return scoreValue;
+        }
+
+        // --- Level Methods ---
+
+        public async Task EditLevelAsync(int userId, List<bool> lvl)
+        {
+            var lvlToUpdate = await _db.Levels.FindAsync(userId); // Припускаємо userId є PK для Level
+
+            if (lvlToUpdate == null)
+            {
+                // Аналогічно до EditScore, перевіряємо User або кидаємо виняток
+                var userExists = await _db.Users.AnyAsync(u => u.UserId == userId);
+                if (!userExists) throw new NotFoundException(nameof(User), userId);
+                throw new NotFoundException(nameof(Levels), userId);
+            }
+            if (lvl == null)
+            {
+                throw new ArgumentNullException(nameof(lvl));
+            }
+
+            lvlToUpdate.CompletedLevels = lvl; // Припускаємо, що поле називається CompletedLevels
+            await _db.SaveChangesAsync();
+        }
+
+        public async Task<List<bool>?> GetLevelAsync(int userId)
+        {
+            // Оптимізація через Select
+            var levels = await _db.Levels
+                .Where(l => l.UserId == userId) // Припускаючи userId - це ключ або FK
+                .Select(l => l.CompletedLevels)
+                .FirstOrDefaultAsync();
+
+            // Поверне null, якщо запис Level не знайдено
+            return levels;
+        }
     }
 }
