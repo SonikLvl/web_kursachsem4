@@ -37,7 +37,7 @@ namespace web_kursachsem4.Data.Models
         public int UserId { get; set; } // PK та FK
 
         // Ця властивість буде зберігатися як JSON у базі даних
-        public List<bool> CompletedLevels { get; set; } = new List<bool>();
+        public string CompletedLevels { get; set; } //bool array
 
         // Навігаційна властивість
         public virtual User User { get; set; }

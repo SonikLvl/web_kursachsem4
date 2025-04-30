@@ -9,6 +9,8 @@ using System.Threading.Tasks;
 //using Npgsql; // Ймовірно, не потрібен при використанні EF Core абстракції
 using web_kursachsem4.Exceptions; // Додайте using для вашого кастомного Exception
 using BCrypt.Net;
+using static System.Runtime.InteropServices.JavaScript.JSType;
+
 
 namespace web_kursachsem4.Services
 {
@@ -22,8 +24,8 @@ namespace web_kursachsem4.Services
         Task<int?> GetScoreAsync(int userId); // Може повернути null
         Task EditScoreAsync(int userId, int score);
 
-        Task<List<bool>?> GetLevelAsync(int userId); // Може повернути null
-        Task EditLevelAsync(int userId, List<bool> lvl);
+        Task<bool[]?> GetLevelAsync(int userId); // Може повернути null
+        Task EditLevelAsync(int userId, string lvl);
         Task<User?> AuthenticateUserAsync(string username, string password); // Повертає User при успіху, null при невдачі
     }
 
@@ -47,30 +49,25 @@ namespace web_kursachsem4.Services
                 return null; // Неправильні вхідні дані
             }
 
-            // 1. Знаходимо користувача за ім'ям (регистрозалежне порівняння за замовчуванням)
+            // Знаходимо користувача за ім'ям (регистрозалежне порівняння за замовчуванням)
             // Якщо потрібне регістронезалежне: u.UserName.ToLower() == username.ToLower()
             var user = await _db.Users.FirstOrDefaultAsync(u => u.UserName == username);
 
-            // 2. Перевіряємо, чи користувача знайдено
             if (user == null)
             {
-                // Користувача не знайдено
                 return null;
             }
 
-            // 3. Перевіряємо пароль за допомогою BCrypt.Verify
             //    user.Password - це збережений хеш з бази даних
             //    password - це простий пароль, введений користувачем під час логіну
             bool isPasswordValid = BCrypt.Net.BCrypt.Verify(password, user.Password);
 
             if (isPasswordValid)
             {
-                // 4. Пароль правильний - повертаємо дані користувача
                 return user;
             }
             else
             {
-                // 5. Пароль неправильний
                 return null;
             }
         }
@@ -91,8 +88,10 @@ namespace web_kursachsem4.Services
             // BCrypt.HashPassword автоматично генерує сіль (salt) і включає її в хеш
             user.Password = BCrypt.Net.BCrypt.HashPassword(user.Password);
 
-
             _db.Users.Add(user); // EF Core автоматично відстежує зміни
+            _db.SaveChanges();
+            _db.Scores.Add(new Score { UserId = user.UserId, ScoreValue = 0, User = user});
+            _db.Levels.Add(new Levels { UserId = user.UserId, CompletedLevels = "f,f,f,f,f,f,f,f,f,f,f,f,f,f,f,f,f,f,f,f", User = user });
             await _db.SaveChangesAsync();
             // Після SaveChanges, user матиме згенерований ID (якщо він генерується БД)
             return user;
@@ -174,7 +173,7 @@ namespace web_kursachsem4.Services
 
         // --- Level Methods ---
 
-        public async Task EditLevelAsync(int userId, List<bool> lvl)
+        public async Task EditLevelAsync(int userId, string lvl)
         {
             var lvlToUpdate = await _db.Levels.FindAsync(userId); // Припускаємо userId є PK для Level
 
@@ -194,16 +193,16 @@ namespace web_kursachsem4.Services
             await _db.SaveChangesAsync();
         }
 
-        public async Task<List<bool>?> GetLevelAsync(int userId)
+        public async Task<bool[]?> GetLevelAsync(int userId)
         {
             // Оптимізація через Select
-            var levels = await _db.Levels
+            string levels = await _db.Levels
                 .Where(l => l.UserId == userId) // Припускаючи userId - це ключ або FK
                 .Select(l => l.CompletedLevels)
                 .FirstOrDefaultAsync();
-
+            levels = levels.TrimEnd('}').TrimStart('{').Replace("f","false").Replace("t", "true");
             // Поверне null, якщо запис Level не знайдено
-            return levels;
+            return levels.Split(',').Select(n => Convert.ToBoolean(n)).ToArray();
         }
     }
 }

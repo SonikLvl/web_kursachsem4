@@ -52,14 +52,14 @@ namespace web_kursachsem4.Data
             {
                 entity.HasKey(l => l.UserId);
 
-                entity.Property(l => l.CompletedLevels)
+                /*entity.Property(l => l.CompletedLevels)
                      .HasConversion(
                          v => JsonSerializer.Serialize(v, (JsonSerializerOptions)null),
                          v => JsonSerializer.Deserialize<List<bool>>(v, (JsonSerializerOptions)null)
                      )
                      .IsRequired(); // Робимо поле обов'язковим, якщо логіка цього вимагає
-                                    // або коротший синтаксис:
-                                    // entity.Property(l => l.CompletedLevels).ToJson().IsRequired();
+                                    */
+                 entity.Property(l => l.CompletedLevels).IsRequired();
 
             });
         }

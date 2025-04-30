@@ -1,11 +1,16 @@
 ﻿using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Logging; 
 using web_kursachsem4.Services;
 using web_kursachsem4.Data.Models;
 using System.Threading.Tasks;
 using web_kursachsem4.Exceptions; 
 using System.Collections.Generic;
 using web_kursachsem4.Web.RequestModels;
+using Microsoft.Extensions.Configuration; 
+using System.IdentityModel.Tokens.Jwt; 
+using System.Security.Claims;          
+using Microsoft.IdentityModel.Tokens;   
+using System.Text;                       
+using Microsoft.AspNetCore.Authorization;
 
 namespace web_kursachsem4.Web
 {
@@ -15,22 +20,71 @@ namespace web_kursachsem4.Web
     {
         private readonly ILogger<MainController> _logger;
         private readonly IMainService _mainService;
+        private readonly IConfiguration _configuration;
 
-        public MainController(ILogger<MainController> logger, IMainService mainService)
+        public MainController(ILogger<MainController> logger, IMainService mainService, IConfiguration configuration)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _mainService = mainService ?? throw new ArgumentNullException(nameof(mainService));
+            _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         }
+        // Допоміжний метод для генерації токена
+        private string GenerateJwtToken(User user)
+        {
+            var jwtSettings = _configuration.GetSection("JwtSettings");
+            var secretKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSettings["SecretKey"]));
+            var credentials = new SigningCredentials(secretKey, SecurityAlgorithms.HmacSha256);
+
+            var claims = new List<Claim> // Використовуємо List<Claim> для гнучкості
+            {
+                new Claim(JwtRegisteredClaimNames.Sub, user.UserId.ToString()), // Subject = User ID
+                new Claim(JwtRegisteredClaimNames.UniqueName, user.UserName),   // Унікальне  username
+                new Claim(JwtRegisteredClaimNames.Email, user.Email),           // Email
+                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()) // Унікальний ID токена
+
+            };
+
+            var token = new JwtSecurityToken(
+                issuer: jwtSettings["Issuer"],
+                audience: jwtSettings["Audience"],
+                claims: claims,
+                expires: DateTime.UtcNow.AddHours(4), // Наприклад, токен дійсний 4 години
+                signingCredentials: credentials);
+
+            return new JwtSecurityTokenHandler().WriteToken(token);
+        }
+        // Метод для отримання ID поточного користувача з токена
+        private int? GetCurrentUserId()
+        {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (string.IsNullOrEmpty(userIdString))
+            {
+                _logger.LogWarning("Could not find NameIdentifier claim in token for current user.");
+                return null; // Або кинути виняток, або повернути помилку в викликаючому методі
+            }
+
+            if (int.TryParse(userIdString, out int userId))
+            {
+                return userId;
+            }
+            else
+            {
+                _logger.LogError("Could not parse user ID '{UserIdString}' from token claim.", userIdString);
+                return null; // Або кинути виняток
+            }
+        }
+
 
         // --- Ендпоінти для користувачів ---
 
         // POST  /api/auth/login
         [HttpPost("auth/login")]
+        [AllowAnonymous]
         [ProducesResponseType(StatusCodes.Status200OK, Type = typeof(User))] // Або тип вашої відповіді при успіху (напр. TokenResponse)
         [ProducesResponseType(StatusCodes.Status400BadRequest)]         // Неправильний запит
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]     // Неправильні логін/пароль
         [ProducesResponseType(StatusCodes.Status500InternalServerError)] // Внутрішня помилка
-        public async Task<ActionResult<User>> Login([FromBody] LoginRequest loginRequest) // Або ActionResult<TokenResponse>
+        public async Task<ActionResult<TokenResponse>> Login([FromBody] LoginRequest loginRequest) // Або ActionResult<TokenResponse>
         {
             if (loginRequest == null || string.IsNullOrWhiteSpace(loginRequest.Username) || string.IsNullOrWhiteSpace(loginRequest.Password))
             {
@@ -45,24 +99,15 @@ namespace web_kursachsem4.Web
                 {
                     _logger.LogInformation("User {Username} authenticated successfully.", loginRequest.Username);
 
-                    // Успішна автентифікація!
-                    // ЩО ПОВЕРТАТИ?
-                    // 1. Просто дані користувача (без хешу пароля!) - як у прикладі нижче.
-                    // 2. Або краще: згенерувати JWT токен і повернути його.
-                    // 3. Або встановити сесійну куку.
+                    // --- Генерація JWT токена ---
+                    var tokenString = GenerateJwtToken(authenticatedUser);
+                    // --------------------------
 
-                    // Приклад повернення даних користувача (видаліть пароль перед поверненням!)
-                    authenticatedUser.Password = string.Empty; // НІКОЛИ не повертайте хеш клієнту
-                    return Ok(authenticatedUser.UserId); 
-
-                    // Приклад повернення JWT (потребує налаштування JWT):
-                    // var token = GenerateJwtToken(authenticatedUser);
-                    // return Ok(new { Token = token });
+                    return Ok(new TokenResponse { Token = tokenString }); // Повертаємо токен
                 }
                 else
                 {
                     _logger.LogWarning("Authentication failed for user {Username}.", loginRequest.Username);
-                    // Не вказуйте, що саме не так (логін чи пароль) для безпеки
                     return Unauthorized(new { message = "Invalid username or password." });
                 }
             }
@@ -73,37 +118,15 @@ namespace web_kursachsem4.Web
             }
         }
 
-        // GET /api/{userId}/username
-        [HttpGet("{userId:int}/username")] // Додаємо обмеження типу :int
-        [ProducesResponseType(StatusCodes.Status200OK, Type = typeof(string))]
-        [ProducesResponseType(StatusCodes.Status404NotFound)]
-        public async Task<ActionResult<string>> GetUsername(int userId)
-        {
-            try
-            {
-                var username = await _mainService.GetUsernameAsync(userId);
-                if (username == null)
-                {
-                    _logger.LogInformation("Username for user {UserId} not found.", userId);
-                    return NotFound($"User with ID {userId} not found.");
-                }
-                return Ok(username);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error getting username for user {UserId}", userId);
-                // Повертаємо 500 Internal Server Error для неочікуваних помилок
-                return StatusCode(StatusCodes.Status500InternalServerError, "An unexpected error occurred.");
-            }
-        }
 
 
-        // POST /api
-        [HttpPost]
-        [ProducesResponseType(StatusCodes.Status201Created, Type = typeof(User))] // Успішне створення
-        [ProducesResponseType(StatusCodes.Status400BadRequest)]                 // Неправильний запит (валідація)
-        [ProducesResponseType(StatusCodes.Status409Conflict)]                 // Користувач вже існує
-        [ProducesResponseType(StatusCodes.Status500InternalServerError)]         // Внутрішня помилка сервера
+        // POST /api/users
+        [HttpPost("users")]
+        [AllowAnonymous]
+        [ProducesResponseType(StatusCodes.Status201Created, Type = typeof(User))] 
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]    
+        [ProducesResponseType(StatusCodes.Status409Conflict)]      
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]         
         public async Task<ActionResult<User>> AddUser([FromBody] NewUserRequest userRequest) // Дані користувача йдуть у тілі запиту
         {
             if (userRequest == null && !ModelState.IsValid) // Перевірка валідності моделі Якщо не використовуєте [ApiController] - (!ModelState.IsValid)
@@ -119,7 +142,7 @@ namespace web_kursachsem4.Web
                     Password = userRequest.Password,
                 };
                 var addedUser = await _mainService.AddUserAsync(user);
-                _logger.LogInformation("User {Username} created with ID {UserId}", addedUser.UserName, addedUser.UserId);
+                _logger.LogInformation($"User {userRequest.UserName} created with ID {addedUser.UserId}", addedUser.UserName, addedUser.UserId);
                 // Повертаємо 201 Created з посиланням на створений ресурс (якщо є GetUserById ендпоінт)
                 // або просто повертаємо створеного користувача
                 return CreatedAtAction(nameof(GetUsername), new { userId = addedUser.UserId }, addedUser); // Потрібен Get ендпоінт з іменем GetUsername
@@ -138,28 +161,66 @@ namespace web_kursachsem4.Web
             }
         }
 
-        // DELETE /api/{userId}
-        [HttpDelete("{userId:int}")]
-        [ProducesResponseType(StatusCodes.Status204NoContent)] // Успішне видалення
+        // GET /api/{userId}/username
+        [HttpGet("me/username")]
+        [Authorize]
+        [ProducesResponseType(StatusCodes.Status200OK, Type = typeof(string))]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-        public async Task<IActionResult> DeleteUser(int userId)
+        public async Task<ActionResult<string>> GetUsername()
         {
+            var userId = GetCurrentUserId();
+            if (userId == null) return Unauthorized(); // Якщо ID не вдалося отримати з токена
+
+            _logger.LogInformation($"User {userId} requesting their own username", userId.Value);
+
             try
             {
-                await _mainService.DeleteUserAsync(userId);
-                _logger.LogInformation("User {UserId} deleted successfully.", userId);
-                return NoContent(); // Стандартна відповідь для успішного DELETE
-            }
-            catch (NotFoundException nfex)
-            {
-                _logger.LogWarning(nfex, "Attempted to delete non-existent user {UserId}.", userId);
-                return NotFound(nfex.Message); // Повертаємо 404 Not Found
+                var username = await _mainService.GetUsernameAsync(userId.Value);
+                if (username == null)
+                {
+                    _logger.LogWarning($"Authenticated user {userId} not found in DB for GetMyUsername.", userId.Value);
+                    return NotFound("User data not found.");
+                }
+                return Ok(username);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error deleting user {UserId}", userId);
-                return StatusCode(StatusCodes.Status500InternalServerError, "An unexpected error occurred while deleting the user.");
+                _logger.LogError(ex, $"Error getting own username for user {userId}", userId.Value);
+                return StatusCode(StatusCodes.Status500InternalServerError, "An unexpected error occurred.");
+            }
+        }
+
+        // DELETE /api/me
+        [HttpDelete("me")]
+        [Authorize]
+        [ProducesResponseType(StatusCodes.Status204NoContent)] // Успішне видалення
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> DeleteUser()
+        {
+            var userId = GetCurrentUserId();
+            if (userId == null) return Unauthorized();
+
+            _logger.LogInformation("User {UserId} attempting to delete their own account", userId.Value);
+
+            try
+            {
+                await _mainService.DeleteUserAsync(userId.Value);
+                _logger.LogInformation("User {UserId} deleted successfully.", userId.Value);
+                return NoContent();
+            }
+            catch (NotFoundException nfex) // Якщо DeleteUserAsync кидає NotFoundException
+            {
+                _logger.LogWarning(nfex, "Attempted to delete own account for user {UserId}, but user was not found.", userId.Value);
+                // Можливо, варто повернути 401 або 500, бо це дивна ситуація
+                return NotFound(nfex.Message);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error deleting own account for user {UserId}", userId.Value);
+                return StatusCode(StatusCodes.Status500InternalServerError, "An unexpected error occurred while deleting the account.");
             }
         }
 
@@ -168,130 +229,186 @@ namespace web_kursachsem4.Web
         // PUT /api/{userId}/score
         // Використовуємо PUT, оскільки замінюємо значення повністю.
         // Якщо б додавали до існуючого, PATCH був би кращим.
-        [HttpPut("{userId:int}/score")]
+        [HttpPut("me/score")]
+        [Authorize]
         [ProducesResponseType(StatusCodes.Status204NoContent)] // Успішне оновлення
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-        public async Task<IActionResult> EditScore(int userId, [FromBody] int score) // Рахунок передається в тілі запиту
+        public async Task<IActionResult> EditScore([FromBody] ScoreChangeRequest scoreChangeRequest) // Рахунок передається в тілі запиту
         {
-            // Можна додати валідацію для score (наприклад, >= 0)
-            if (score < 0)
+            var userId = GetCurrentUserId();
+            if (userId == null) return Unauthorized();
+
+            _logger.LogInformation("User {UserId} attempting to edit their score", userId.Value);
+
+            if (scoreChangeRequest.Score < 0)
             {
                 return BadRequest("Score cannot be negative.");
             }
             try
             {
-                await _mainService.EditScoreAsync(userId, score);
-                _logger.LogInformation("Score for user {UserId} updated to {ScoreValue}", userId, score);
-                return NoContent(); // Успішне оновлення, вміст не повертаємо
+                // Викликаємо сервіс з ID з токена
+                await _mainService.EditScoreAsync(userId.Value, scoreChangeRequest.Score);
+                _logger.LogInformation($"Score for user {userId} updated to {scoreChangeRequest.Score}", userId.Value, scoreChangeRequest.Score);
+                return NoContent();
             }
             catch (NotFoundException nfex)
             {
-                _logger.LogWarning(nfex, "Attempted to edit score for non-existent user or score record {UserId}.", userId);
+                _logger.LogWarning(nfex, $"Attempted to edit score for user {userId}, but user/score record not found.", userId.Value);
                 return NotFound(nfex.Message);
-            }
-            catch (ArgumentNullException anex) // Якщо score передали як null (хоча int не може бути null)
-            {
-                _logger.LogWarning(anex, "Attempted to edit score with null value for user {UserId}.", userId);
-                return BadRequest(anex.Message);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error editing score for user {UserId}", userId);
-                return StatusCode(StatusCodes.Status500InternalServerError, "An unexpected error occurred.");
+                _logger.LogError(ex, $"Error editing own score for user {userId}", userId.Value);
+                return StatusCode(StatusCodes.Status500InternalServerError, "An unexpected error occurred while editing the score.");
             }
         }
 
-        // GET /api/users/{userId}/score
-        [HttpGet("{userId:int}/score")]
+        // GET /api/{userId}/score
+        [HttpGet("me/score")]
+        [Authorize]
         [ProducesResponseType(StatusCodes.Status200OK, Type = typeof(int))]
         [ProducesResponseType(StatusCodes.Status404NotFound)] // Якщо юзера або рахунку немає
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-        public async Task<ActionResult<int>> GetScore(int userId)
+        public async Task<ActionResult<int>> GetScore()
         {
+            var userId = GetCurrentUserId();
+            if (userId == null) return Unauthorized();
+
+            _logger.LogInformation($"User {userId} requesting their own score", userId.Value);
+
             try
             {
-                var score = await _mainService.GetScoreAsync(userId);
+                // Викликаємо сервіс з ID з токена
+                var score = await _mainService.GetScoreAsync(userId.Value);
                 if (score == null)
                 {
-                    _logger.LogInformation("Score for user {UserId} not found.", userId);
-                    // Вирішіть, чи це 404 для юзера чи для рахунку.
-                    // Можливо, перевірити існування юзера окремо, якщо потрібно розрізняти.
-                    return NotFound($"Score data not found for user ID {userId}.");
+                    _logger.LogInformation($"Score data not found for user {userId}.", userId.Value);
+                    return NotFound("Score data not found.");
                 }
                 return Ok(score.Value);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error getting score for user {UserId}", userId);
-                return StatusCode(StatusCodes.Status500InternalServerError, "An unexpected error occurred.");
+                _logger.LogError(ex, $"Error getting own score for user {userId}", userId.Value);
+                return StatusCode(StatusCodes.Status500InternalServerError, "An unexpected error occurred while retrieving the score.");
             }
         }
 
         // --- Ендпоінти для Level ---
 
-        // PUT /api/users/{userId}/levels
-        [HttpPut("{userId:int}/levels")]
+        // PUT /api/{userId}/levels
+        [HttpPut("me/levels")]
+        [Authorize]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-        public async Task<IActionResult> EditLevel(int userId, [FromBody] List<bool> levels) // Список рівнів передається в тілі
+        public async Task<IActionResult> EditMyLevels(LvlsChangeRequest lvlsChangeRequest)
         {
-            if (levels == null)
+            var userId = GetCurrentUserId();
+            if (userId == null) return Unauthorized();
+
+            _logger.LogInformation($"User {userId} attempting to edit their levels", userId.Value);
+
+            if (lvlsChangeRequest.Levels == null)
             {
                 return BadRequest("Level data cannot be null.");
             }
             try
             {
-                await _mainService.EditLevelAsync(userId, levels);
-                _logger.LogInformation("Levels for user {UserId} updated.", userId);
+                // Викликаємо сервіс з ID з токена
+                await _mainService.EditLevelAsync(userId.Value, lvlsChangeRequest.Levels);
+                _logger.LogInformation($"Levels for user {userId} updated.", userId.Value);
                 return NoContent();
             }
             catch (NotFoundException nfex)
             {
-                _logger.LogWarning(nfex, "Attempted to edit levels for non-existent user or level record {UserId}.", userId);
+                _logger.LogWarning(nfex, $"Attempted to edit levels for user {userId}, but user/level record not found.", userId.Value);
                 return NotFound(nfex.Message);
             }
             catch (ArgumentNullException anex)
             {
-                _logger.LogWarning(anex, "Attempted to edit levels with null value for user {UserId}.", userId);
+                _logger.LogWarning(anex, $"Attempted to edit levels with null value for user {userId}.", userId.Value);
                 return BadRequest(anex.Message);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error editing levels for user {UserId}", userId);
-                return StatusCode(StatusCodes.Status500InternalServerError, "An unexpected error occurred.");
+                _logger.LogError(ex, $"Error editing own levels for user {userId}", userId.Value);
+                return StatusCode(StatusCodes.Status500InternalServerError, "An unexpected error occurred while editing levels.");
             }
         }
 
-        // GET /api/users/{userId}/levels
-        [HttpGet("{userId:int}/levels")]
-        [ProducesResponseType(StatusCodes.Status200OK, Type = typeof(List<bool>))]
+        // GET /api/me/levels (Отримати рівні поточного користувача)
+        [HttpGet("me/levels")]
+        [Authorize]
+        [ProducesResponseType(StatusCodes.Status200OK, Type = typeof(bool[]))]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-        public async Task<ActionResult<List<bool>>> GetLevel(int userId)
+        public async Task<ActionResult<bool[]>> GetMyLevels()
         {
+            var userId = GetCurrentUserId();
+            if (userId == null) return Unauthorized();
+
+            _logger.LogInformation($"User {userId} requesting their own levels", userId.Value);
+
             try
             {
-                var levels = await _mainService.GetLevelAsync(userId);
+                // Викликаємо сервіс з ID з токена
+                var levels = await _mainService.GetLevelAsync(userId.Value);
+                _logger.LogInformation($"Level data {levels} {levels.GetType}");
+
                 if (levels == null)
                 {
-                    _logger.LogInformation("Level data for user {UserId} not found.", userId);
-                    return NotFound($"Level data not found for user ID {userId}.");
+                    _logger.LogInformation($"Level data not found for user {userId}.", levels);
+                    return NotFound($"Level data not found.");
                 }
                 return Ok(levels);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error getting levels for user {UserId}", userId);
+                _logger.LogError(ex, $"Error getting own levels for user {userId}");
+                return StatusCode(StatusCodes.Status500InternalServerError, "An unexpected error occurred while retrieving levels.");
+            }
+        }
+
+        // --- Захищений ендпоінт для отримання даних ІНШОГО користувача ---
+
+        // GET /api/users/{userId}/username (Отримати ім'я будь-якого користувача за ID)
+        [HttpGet("users/{userId:int}/username")]
+        [Authorize] // Вимагає лише автентифікації, щоб дивитись імена інших
+        [ProducesResponseType(StatusCodes.Status200OK, Type = typeof(string))]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public async Task<ActionResult<string>> GetUsername(int userId) // Приймає userId з URL
+        {
+            var currentUserId = GetCurrentUserId(); // Отримуємо ID того, хто запитує, для логування
+            _logger.LogInformation("User {CurrentUserId} requesting username for {TargetUserId}", currentUserId?.ToString() ?? "Unknown", userId);
+
+            try
+            {
+                // Викликаємо сервіс з ID з URL
+                var username = await _mainService.GetUsernameAsync(userId);
+                if (username == null)
+                {
+                    return NotFound($"User with ID {userId} not found.");
+                }
+                return Ok(username);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting username for user {UserId}", userId);
                 return StatusCode(StatusCodes.Status500InternalServerError, "An unexpected error occurred.");
             }
         }
 
         // Можна видалити ваш тестовий ендпоінт або залишити для швидкої перевірки
         [HttpGet("/api/test")]
+        [AllowAnonymous]
         [ApiExplorerSettings(IgnoreApi = true)] // Не показувати в Swagger UI
         public ActionResult GetTest()
         {
