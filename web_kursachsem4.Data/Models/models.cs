@@ -17,7 +17,9 @@ namespace web_kursachsem4.Data.Models
 
         // Навігація
         public virtual Score Score { get; set; }
+
         public virtual Levels Levels { get; set; }
+
     }
 
     public class Score
@@ -25,8 +27,12 @@ namespace web_kursachsem4.Data.Models
         // [Key] // Можна вказати тут або через Fluent API
         // [ForeignKey("User")] // Можна вказати тут або через Fluent API
         public int UserId { get; set; } // PK та FK
+        public string UserName { get; set; }
         public int ScoreValue { get; set; }
         public virtual User User { get; set; }
+        public virtual User UserByName { get; set; }
+
+
     }
 
     public class Levels

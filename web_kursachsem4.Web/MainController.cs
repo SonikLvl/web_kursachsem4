@@ -295,6 +295,32 @@ namespace web_kursachsem4.Web
                 return StatusCode(StatusCodes.Status500InternalServerError, "An unexpected error occurred while retrieving the score.");
             }
         }
+        // GET /api/leaderboard
+        [HttpGet("leaderboard")]
+        [AllowAnonymous]
+        [ProducesResponseType(StatusCodes.Status200OK, Type = typeof(int))]
+        [ProducesResponseType(StatusCodes.Status404NotFound)] 
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public async Task<ActionResult<Score[]>> GetLeaderboard()
+        {
+
+            try
+            {
+                // Викликаємо сервіс з ID з токена
+                var score = await _mainService.GetLeaderBoard();
+                if (score == null)
+                {
+                    _logger.LogInformation($"No data for leaderboard");
+                    return NotFound("Score data not found.");
+                }
+                return Ok(score);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,"Exception Caught");
+                return StatusCode(StatusCodes.Status500InternalServerError, "An unexpected error occurred while retrieving the score.");
+            }
+        }
 
         // --- Ендпоінти для Level ---
 

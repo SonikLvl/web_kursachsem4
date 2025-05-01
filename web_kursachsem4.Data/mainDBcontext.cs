@@ -26,6 +26,7 @@ namespace web_kursachsem4.Data
                 entity.HasKey(u => u.UserId);
 
                 entity.Property(u => u.UserName).IsRequired().HasMaxLength(100);
+                entity.HasIndex(u => u.UserName).IsUnique();
                 entity.HasIndex(u => u.Email).IsUnique(); 
                 entity.Property(u => u.Email).IsRequired();
                 entity.Property(u => u.Password).IsRequired();
@@ -34,6 +35,7 @@ namespace web_kursachsem4.Data
                 entity.HasOne(u => u.Score)
                       .WithOne(s => s.User)
                       .HasForeignKey<Score>(s => s.UserId);
+                
 
                 // User має один Levels, Levels має одного User, зовнішній ключ у Levels
                 entity.HasOne(u => u.Levels)
@@ -46,6 +48,11 @@ namespace web_kursachsem4.Data
                 entity.HasKey(s => s.UserId);
 
                 entity.Property(s => s.ScoreValue).IsRequired();
+                entity.HasOne(s => s.UserByName)
+                      .WithOne()
+                      .HasPrincipalKey<User>(u => u.UserName)
+                      .HasForeignKey<Score>(s => s.UserName)
+                      .OnDelete(DeleteBehavior.Restrict);
             });
 
             modelBuilder.Entity<Levels>(entity =>

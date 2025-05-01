@@ -24,6 +24,8 @@ namespace web_kursachsem4.Services
         Task<int?> GetScoreAsync(int userId); // Може повернути null
         Task EditScoreAsync(int userId, int score);
 
+        Task<Score[]> GetLeaderBoard();
+
         Task<bool[]?> GetLevelAsync(int userId); // Може повернути null
         Task EditLevelAsync(int userId, string lvl);
         Task<User?> AuthenticateUserAsync(string username, string password); // Повертає User при успіху, null при невдачі
@@ -90,7 +92,7 @@ namespace web_kursachsem4.Services
 
             _db.Users.Add(user); // EF Core автоматично відстежує зміни
             _db.SaveChanges();
-            _db.Scores.Add(new Score { UserId = user.UserId, ScoreValue = 0, User = user});
+            _db.Scores.Add(new Score { UserId = user.UserId, UserName = user.UserName, ScoreValue = 0, User = user });
             _db.Levels.Add(new Levels { UserId = user.UserId, CompletedLevels = "f,f,f,f,f,f,f,f,f,f,f,f,f,f,f,f,f,f,f,f", User = user });
             await _db.SaveChangesAsync();
             // Після SaveChanges, user матиме згенерований ID (якщо він генерується БД)
@@ -169,6 +171,16 @@ namespace web_kursachsem4.Services
 
             // Поверне null, якщо запис Score не знайдено
             return scoreValue;
+        }
+
+        public async Task<Score[]> GetLeaderBoard()
+        {
+            var leaderBord = await _db.Scores
+                //.Select(s => s.ScoreValue)
+                .OrderByDescending(s => s.ScoreValue)
+                .Take(10)
+                .ToArrayAsync();
+            return leaderBord;
         }
 
         // --- Level Methods ---
