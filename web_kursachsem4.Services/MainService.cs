@@ -18,11 +18,13 @@ namespace web_kursachsem4.Services
     public interface IMainService
     {
         Task<string?> GetUsernameAsync(int userId); // Може повернути null, якщо не знайдено
+        Task<string?> GetEmailAsync(int userId);
         Task<User> AddUserAsync(User user); // Повертаємо доданого користувача (з ID)
         Task DeleteUserAsync(int userId);
 
         Task<int?> GetScoreAsync(int userId); // Може повернути null
         Task EditScoreAsync(int userId, int score);
+
 
         Task<Score[]> GetLeaderBoard();
 
@@ -139,6 +141,18 @@ namespace web_kursachsem4.Services
             // }
             // return username;
         }
+        public async Task<string?> GetEmailAsync(int userId)
+        {
+            // FindAsync завантажує всю сутність. Якщо потрібне тільки одне поле, краще так:
+            var email = await _db.Users
+                .Where(u => u.UserId == userId) // Припускаючи, що поле називається UserId
+                .Select(u => u.Email)
+                .FirstOrDefaultAsync();
+
+            
+            return email;
+            
+        }
 
         // --- Score Methods ---
 
@@ -160,6 +174,7 @@ namespace web_kursachsem4.Services
             // _db.Update(scoreToUpdate); // Явно викликати Update зазвичай не потрібно, EF Core відстежує зміни
             await _db.SaveChangesAsync();
         }
+        
 
         public async Task<int?> GetScoreAsync(int userId)
         {

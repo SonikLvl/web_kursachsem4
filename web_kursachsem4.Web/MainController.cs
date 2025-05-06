@@ -192,6 +192,37 @@ namespace web_kursachsem4.Web
             }
         }
 
+        // GET /api/{userId}/username
+        [HttpGet("me/email")]
+        [Authorize]
+        [ProducesResponseType(StatusCodes.Status200OK, Type = typeof(string))]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public async Task<ActionResult<string>> GetEmail()
+        {
+            var userId = GetCurrentUserId();
+            if (userId == null) return Unauthorized(); // Якщо ID не вдалося отримати з токена
+
+            _logger.LogInformation($"User {userId} requesting their own email", userId.Value);
+
+            try
+            {
+                var email = await _mainService.GetEmailAsync(userId.Value);
+                if (email == null)
+                {
+                    _logger.LogWarning($"Authenticated user {userId} not found in DB for GetMyUEmail.", userId.Value);
+                    return NotFound("User data not found.");
+                }
+                return Ok(email);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error getting own username for user {userId}", userId.Value);
+                return StatusCode(StatusCodes.Status500InternalServerError, "An unexpected error occurred.");
+            }
+        }
+
         // DELETE /api/me
         [HttpDelete("me")]
         [Authorize]
@@ -223,6 +254,8 @@ namespace web_kursachsem4.Web
                 return StatusCode(StatusCodes.Status500InternalServerError, "An unexpected error occurred while deleting the account.");
             }
         }
+
+       
 
         // --- Ендпоінти для Score ---
 

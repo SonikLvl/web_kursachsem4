@@ -1,20 +1,30 @@
-import { fileURLToPath, URL } from 'node:url'
+// vite.config.js
+import { defineConfig } from 'vite';
+import vue from '@vitejs/plugin-vue';
+import path from 'path';
 
-import { defineConfig } from 'vite'
-import vue from '@vitejs/plugin-vue'
-import vueJsx from '@vitejs/plugin-vue-jsx'
-import vueDevTools from 'vite-plugin-vue-devtools'
-
-// https://vite.dev/config/
 export default defineConfig({
-  plugins: [
-    vue(),
-    vueJsx(),
-    vueDevTools(),
-  ],
+  plugins: [vue()],
   resolve: {
     alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url))
+      '@': path.resolve(__dirname, './src'),
     },
   },
-})
+  server: {
+    proxy: {
+      // Проксіювати запити, що починаються з '/api'
+      '/api': {
+        // Адреса вашого бекенд-сервера, ВРАХОВУЮЧИ HTTPS та ПОРТ
+        target: 'https://localhost:7167', // <--- ЗМІНЕНО НА HTTPS!
+        // Дозволити проксіювання з http на https
+        changeOrigin: true,
+        // Оскільки ваш бекенд вже очікує '/api' у шляху, НЕ ПОТРІБНО його видаляти!
+        // Видаліть або закоментуйте правило rewrite
+        // rewrite: (path) => path.replace(/^\/api/, ''), // <-- ЦЕЙ РЯДОК ПОТРІБНО ВИДАЛИТИ АБО ЗАКОМЕНТУВАТИ
+
+        // Оскільки це localhost на HTTPS, часто потрібно відключити перевірку SSL-сертифіката
+        secure: false, // <--- ДОДАНО ЦЮ НАСТРОЙКУ ДЛЯ HTTPS НА LOCALHOST
+      },
+    },
+  },
+});
