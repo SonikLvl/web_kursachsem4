@@ -1,13 +1,208 @@
 <!DOCTYPE html>
-<html lang="">
+<html lang="uk">
   <head>
     <meta charset="UTF-8">
     <link rel="icon" href="/favicon.ico">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tetset</title>
+    <title>Tetris</title>
+    <style>
+      /* Глобальні стилі для темної теми */
+      body {
+        background-color: #121212;
+        color: #e0e0e0;
+        margin: 0;
+        padding: 0;
+        font-family: sans-serif;
+      }
+     
+      #unity-container {
+        margin: 60px auto;
+        margin-right: 80px;
+        border: 1px solid #444;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+        padding: 10px;
+        background-color: #1e1e1e;
+        border-radius: 8px;
+        width: fit-content;
+      }
+     
+      #unity-loading-bar {
+        margin: 0 auto;
+        width: 240px;
+      }
+     
+      #unity-progress-bar-empty {
+        background-color: #333;
+        height: 10px;
+        border-radius: 10px;
+        overflow: hidden;
+      }
+     
+      #unity-progress-bar-full {
+        background-color: #4dabf7;
+        height: 100%;
+        width: 0%;
+        transition: width 0.3s ease-in-out;
+      }
+     
+      #unity-footer {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 10px;
+        padding: 0 10px;
+        color: #aaa;
+      }
+     
+      #unity-warning {
+        position: absolute;
+        top: 10px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 10;
+        background-color: #ff6b6b;
+        color: #fff;
+        padding: 8px 16px;
+        border-radius: 4px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        display: none;
+      }
+     
+      #unity-fullscreen-button {
+        width: 28px;
+        height: 28px;
+        cursor: pointer;
+        position: relative;
+        border: 1px solid #555;
+        background-color: #333;
+        border-radius: 3px;
+        box-sizing: border-box;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        transition: all 0.2s ease;
+      }
+     
+      #unity-fullscreen-button:hover {
+        background-color: #444;
+      }
+     
+      #unity-fullscreen-button::before,
+      #unity-fullscreen-button::after {
+        content: '';
+        position: absolute;
+        width: 10px;
+        height: 10px;
+        border-color: #aaa;
+        border-style: solid;
+      }
+     
+      #unity-fullscreen-button::before {
+        top: 4px;
+        left: 4px;
+        border-width: 2px 0 0 2px;
+      }
+     
+      #unity-fullscreen-button::after {
+        bottom: 4px;
+        right: 4px;
+        border-width: 0 2px 2px 0;
+      }
+     
+      /* Стилі для мобільних пристроїв */
+      @media (max-width: 768px) {
+        #unity-container {
+          width: 95%;
+          height: auto;
+          padding: 5px;
+          margin: 10px auto;
+        }
+       
+        #unity-canvas {
+          width: 100% !important;
+          height: auto !important;
+        }
+      }
+    </style>
   </head>
   <body>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
+
+    <div id="unity-container" class="unity-desktop">
+      <canvas id="unity-canvas" width=900 height=600></canvas>
+      <div id="unity-loading-bar">
+        <div id="unity-logo"></div>
+        <div id="unity-progress-bar-empty">
+          <div id="unity-progress-bar-full"></div>
+        </div>
+      </div>
+      <div id="unity-warning"></div>
+      <div id="unity-footer">
+        <div id="unity-logo-title-footer"></div>
+        <div id="unity-fullscreen-button"></div>
+      </div>
+    </div>
+
+    <script>
+            var canvas = document.querySelector("#unity-canvas");
+      
+            var unityInstance = null; // Залишаємо оголошення
+      
+            function unityShowBanner(msg, type) {
+              // ... ваш існуючий код unityShowBanner ...
+            }
+      
+            var buildUrl = "Build";
+            var loaderUrl = buildUrl + "/test.loader.js";
+            var config = {
+              arguments: [],
+              dataUrl: buildUrl + "/test.data.br",
+              frameworkUrl: buildUrl + "/test.framework.js.br",
+              codeUrl: buildUrl + "/test.wasm.br",
+              streamingAssetsUrl: "StreamingAssets",
+              companyName: "DefaultCompany",
+              productName: "tetris",
+              productVersion: "1.0",
+              doNotCaptureKeyboard: true,
+            };
+      
+            if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+              var meta = document.createElement('meta');
+              meta.name = 'viewport';
+              meta.content = 'width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes';
+              document.getElementsByTagName('head')[0].appendChild(meta);
+              document.querySelector("#unity-container").className = "unity-mobile";
+              canvas.className = "unity-mobile";
+            } else {
+              canvas.style.width = "900px";
+              canvas.style.height = "600px";
+            }
+      
+            document.querySelector("#unity-loading-bar").style.display = "block";
+      
+            var script = document.createElement("script");
+            script.src = loaderUrl;
+            script.onload = () => {
+              createUnityInstance(canvas, config, (progress) => {
+                document.querySelector("#unity-progress-bar-full").style.width = 100 * progress + "%";
+              }).then((instance) => { // <--- Змінили ім'я параметра на 'instance'
+                  // Тепер присвоюємо отриманий екземпляр обом змінним
+                  unityInstance = instance; // Присвоюємо змінній у верхній області видимості скрипта
+                  window.unityInstance = instance; // <--- Ось цей рядок додаємо для глобального доступу
+      
+                  document.querySelector("#unity-loading-bar").style.display = "none";
+                  canvas.focus();
+                  document.querySelector("#unity-fullscreen-button").onclick = () => {
+                    unityInstance.SetFullscreen(1); // Тепер використовуємо змінну з верхньої області
+                  };
+                }).catch((message) => {
+                  // Це спрацює, якщо Unity не завантажиться. Alert покаже причину.
+                  alert(`Помилка завантаження Unity: ${message}`);
+                });
+              };
+      
+            document.body.appendChild(script);
+          </script>
   </body>
 </html>

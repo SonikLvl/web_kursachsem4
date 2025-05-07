@@ -1,8 +1,6 @@
 <script setup lang="ts">
-import { ref, reactive, watch, onMounted } from 'vue';
+import { ref, reactive, watch, onMounted, computed, onUnmounted } from 'vue';
 import UserService from '@/services/userService';
-// Імпортуємо потрібні типи з сервісу
-// Прибрано IUserProfile та INewUser, оскільки повний об'єкт профілю більше не потрібен у user.value для цього сценарію
 import type { ILoginResponse, ICreatedUser, ILoginCredentials } from '@/services/userService';
 import axios from 'axios';
 
@@ -14,20 +12,15 @@ interface ApiError extends Error {
 
 // --- Стани компонента ---
 const isLoggedIn = ref(false);
-// user ref видалено, оскільки ми більше не зберігаємо повний об'єкт профілю тут
-// const user = ref<User | null>(null);
-const currentUsername = ref<string | null>(null); // Зберігає ім'я користувача
-const currentEmail = ref<string | null>(null); // НОВИЙ стан для зберігання email
+const currentUsername = ref<string | null>(null);
+const currentEmail = ref<string | null>(null);
 const isLoading = ref(false);
 const userService = new UserService();
 
-// --- Модальні вікна ---
 const showLoginModal = ref(false);
 const showSignupModal = ref(false);
-// showEditModal перейменовано на showProfileDetails
 const showProfileDetails = ref<boolean>(false);
 
-// --- Форми (форму редагування видалено) ---
 const loginForm = reactive({
   username: '',
   password: '',
@@ -39,44 +32,117 @@ const signupForm = reactive({
   password: '',
 });
 
-// editForm reactive object видалено, оскільки форми редагування більше немає
-// const editForm = reactive({ ... });
-
-
-// --- Повідомлення (повідомлення про редагування видалено) ---
 const createUserError = ref<string | null>(null);
 const createdUserMessage = ref<string | null>(null);
 const loginError = ref<string | null>(null);
-// editProfileError та editProfileSuccessMessage видалено
-// const editProfileError = ref<string | null>(null);
-// const editProfileSuccessMessage = ref<string | null>(null);
+
+// --- Новий стан для відстеження, чи Unity завантажено і доступно ---
+const unityLoaded = ref(false);
+// ВИПРАВЛЕННЯ: Прибираємо явне ': number | null', щоб уникнути проблем з типами Node.js/браузера
+// Або використовуємо 'any' для простоти, щоб TypeScript не сварився
+let unityCheckTimer: any = null;
 
 
 // --- Функції ---
-
 const closeModals = () => {
   showLoginModal.value = false;
   showSignupModal.value = false;
-  // showEditModal замінено на showProfileDetails
-  showProfileDetails.value = false;
+  showProfileDetails.value = false; // Важливо скидати всі стани модалок
   loginError.value = null;
   createUserError.value = null;
   createdUserMessage.value = null;
-  // Повідомлення про редагування також очищаються при закритті (видалені)
-  // editProfileError.value = null;
-  // editProfileSuccessMessage.value = null;
-  // Скидання форми редагування більше не потрібне
-  // Watcher скидання форми редагування видалено
 };
 
 const resetForms = () => {
   Object.assign(loginForm, { username: '', password: '' });
   Object.assign(signupForm, { username: '', email: '', password: '' });
-  // editForm скидання видалено
-  // Object.assign(editForm, { username: '', email: '', password: '' });
 };
 
-// --- Вхід користувача (оновлено для отримання email також) ---
+// --- Функція для надсилання команди паузи/відновлення до Unity ---
+// Винесено в окрему функцію для чистоти
+const sendUnityPauseState = (isPaused: boolean) => {
+  const unityInstance = (window as any).unityInstance; // Знову отримуємо інстанс
+
+  if (unityInstance) {
+    console.log(`[Vue -> Unity] Надсилаємо повідомлення: 'SetPaused', ${isPaused ? 1 : 0}`);
+    try {
+      // ПЕРЕКОНАЙТЕСЯ, ЩО "GameManager" І "SetPaused" ПОВНІСТЮ ВІДПОВІДАЮТЬ
+      // НАЗВІ ВАШОГО UNITY GAMEOBJECT ТА C# ФУНКЦІЇ.
+      unityInstance.SendMessage('StopGameManager', 'SetPaused', isPaused ? 1 : 0); // Передаємо 1 для паузи (true), 0 для відновлення (false)
+
+    } catch (e) {
+       console.error("[Vue -> Unity] Помилка під час відправки повідомлення до Unity:", e);
+       // Якщо сталася помилка, це може бути через невірні назви, або Unity ще не повністю готовий
+    }
+  } else {
+     console.warn("[Vue -> Unity] Екземпляр Unity ще не доступний. Повідомлення про паузу не відправлено.");
+  }
+};
+
+
+// --- Обчислюване властивість, що відстежує, чи відкрита хоча б одна модалка ---
+const isAnyModalOpen = computed(() => {
+  return showLoginModal.value || showSignupModal.value || showProfileDetails.value;
+});
+
+// --- Watcher для виклику паузи/відновлення, коли змінюється стан модалок ---
+// Тепер цей watcher просто викликає функцію відправки
+watch(isAnyModalOpen, (isOpen) => {
+    sendUnityPauseState(isOpen);
+});
+
+
+// --- Функція для періодичної перевірки, чи завантажився Unity ---
+const checkUnityLoaded = () => {
+  const unityInstance = (window as any).unityInstance;
+  if (unityInstance) {
+    console.log("[Vue] Unity Instance знайдено!");
+    unityLoaded.value = true;
+    if (unityCheckTimer !== null) {
+      clearInterval(unityCheckTimer); // Зупиняємо таймер, якщо Unity знайдено
+      unityCheckTimer = null;
+    }
+
+    // *** ВАЖЛИВО ***
+    // Як тільки Unity завантажено, відправляємо поточний стан модалок.
+    // Це потрібно, щоб Unity "знав" про стан модалок, якщо вони були відкриті
+    // до повного завантаження Unity.
+    sendUnityPauseState(isAnyModalOpen.value);
+
+  } else {
+    console.log("[Vue] Unity Instance поки не знайдено, чекаємо...");
+   }
+};
+
+
+// --- Життєвий цикл: при монтуванні компонента ---
+onMounted(async () => {
+  // ... (ваш існуючий код перевірки авторизації) ...
+
+  // Закриваємо модалки при монтуванні. Це ініціює watcher, який спробує
+  // відправити команду відновлення (якщо Unity готовий) або виведе попередження.
+  closeModals();
+
+  // Запускаємо періодичну перевірку завантаження Unity
+  // Перевіряємо одразу при монтуванні
+  checkUnityLoaded();
+  // Потім запускаємо таймер для регулярних перевірок, якщо Unity одразу не знайшли
+  if (!unityLoaded.value) {
+      unityCheckTimer = setInterval(checkUnityLoaded, 500); // Перевіряємо кожні 500 мс
+   }
+});
+
+// --- Життєвий цикл: при демонтажі компонента ---
+// Очищаємо таймер, щоб уникнути витоків пам'яті
+onUnmounted(() => {
+  if (unityCheckTimer !== null) {
+    clearInterval(unityCheckTimer);
+    unityCheckTimer = null;
+  }
+});
+
+
+// --- Вхід користувача ---
 const handleLogin = async () => {
    if (!loginForm.username || !loginForm.password) {
      loginError.value = "Будь ласка, введіть ім'я користувача та пароль.";
@@ -84,9 +150,9 @@ const handleLogin = async () => {
    }
    isLoading.value = true;
    loginError.value = null;
-   // user.value = null; // user ref видалено
+
    currentUsername.value = null;
-   currentEmail.value = null; // Очищаємо email
+   currentEmail.value = null;
    isLoggedIn.value = false;
    localStorage.removeItem('authToken');
    delete axios.defaults.headers.common['Authorization'];
@@ -104,9 +170,9 @@ const handleLogin = async () => {
      localStorage.setItem('authToken', loginResponse.token);
      axios.defaults.headers.common['Authorization'] = `Bearer ${loginResponse.token}`;
 
-      // Після успішного отримання токена, отримуємо ім'я та email
+
       try {
-         // Можна виконувати паралельно для швидкості, або послідовно
+
          const username = await userService.getCurrentUser(); // Отримуємо ім'я
          const email = await userService.getCurrentEmail(); // Отримуємо email
 
@@ -121,7 +187,6 @@ const handleLogin = async () => {
          localStorage.removeItem('authToken');
          delete axios.defaults.headers.common['Authorization'];
          isLoggedIn.value = false;
-         // user.value = null; // user ref видалено
          currentUsername.value = null;
          currentEmail.value = null;
          throw new Error(`Вхід успішний, але не вдалося завантажити дані користувача: ${ (profileError as Error).message || 'Невідома помилка.'}`);
@@ -135,7 +200,6 @@ const handleLogin = async () => {
      console.error('Помилка входу:', err);
      loginError.value = err.message || 'Сталася невідома помилка під час входу.';
       isLoggedIn.value = false;
-      // user.value = null; // user ref видалено
       currentUsername.value = null;
       currentEmail.value = null; // Очищаємо email
       localStorage.removeItem('authToken');
@@ -145,7 +209,7 @@ const handleLogin = async () => {
    }
 };
 
-// --- Реєстрація користувача (без змін) ---
+// --- Реєстрація користувача ---
 const handleSignup = async () => {
    if (!signupForm.username.trim() || !signupForm.email.trim() || !signupForm.password.trim()) {
      createUserError.value = "Всі поля реєстрації обов'язкові.";
@@ -182,18 +246,17 @@ const handleSignup = async () => {
   }
 };
 
-// --- Вихід користувача (оновлено для очищення email) ---
+// --- Вихід користувача ---
 const handleLogout = async () => {
     isLoading.value = true;
 
     try {
-      // Optional: await userService.logout();
+
 
       localStorage.removeItem('authToken');
       delete axios.defaults.headers.common['Authorization'];
 
       isLoggedIn.value = false;
-      // user.value = null; // user ref видалено
       currentUsername.value = null; // Скидаємо ім'я користувача
       currentEmail.value = null; // Скидаємо email
       resetForms();
@@ -206,7 +269,6 @@ const handleLogout = async () => {
       localStorage.removeItem('authToken');
       delete axios.defaults.headers.common['Authorization'];
       isLoggedIn.value = false;
-      // user.value = null; // user ref видалено
       currentUsername.value = null;
       currentEmail.value = null; // Скидаємо email
       resetForms();
@@ -218,16 +280,13 @@ const handleLogout = async () => {
 };
 
 
-// --- Відновлення пароля (без змін) ---
+// --- Відновлення пароля ---
 const handleForgotPassword = async () => {
   alert('Функціонал відновлення пароля ще не реалізовано.');
 };
 
-// --- Функція редагування профілю видалена ---
-// const handleEditCredentials = async () => { ... };
 
-
-// --- Видалення акаунту (без змін) ---
+// --- Видалення акаунту ---
 const handleDeleteAccount = async () => {
    if (!isLoggedIn.value || !currentUsername.value) {
       console.warn('Спроба видалити акаунт без автентифікації.');
@@ -261,12 +320,7 @@ const handleDeleteAccount = async () => {
 };
 
 
-// --- Watchers (видалено watcher для editModal) ---
-// Watcher для showEditModal видалено, оскільки форми редагування більше немає.
-// Якщо потрібна якась логіка при відкритті/закритті showProfileDetails, її треба додати тут.
-// watch(showEditModal, ...) видалено.
-
-// --- Перевірка стану авторизації при завантаженні компонента (оновлено для отримання email) ---
+// --- Перевірка стану авторизації при завантаженні компонента ---
 onMounted(async () => { // Робимо async, щоб використовувати await
   const token = localStorage.getItem('authToken');
   if (token) {
@@ -292,6 +346,7 @@ onMounted(async () => { // Робимо async, щоб використовува
       currentEmail.value = null; // Очищаємо email
     }
   }
+  
 });
 
 </script>
@@ -467,7 +522,7 @@ onMounted(async () => { // Робимо async, щоб використовува
 .profile-details p {
   margin: 5px 0;
   font-size: 1rem;
-  color: #333;
+  color: #ffffff;
 }
 
 @media (max-width: 576px) {
@@ -482,9 +537,9 @@ onMounted(async () => { // Робимо async, щоб використовува
 }
 
 .top-menu {
-  background-color: #f8f9fa;
+  background-color: #181818;
   padding: 10px 20px;
-  border-bottom: 1px solid #dee2e6;
+  border-bottom: 1px solid #021120;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -513,8 +568,8 @@ onMounted(async () => { // Робимо async, щоб використовува
 button {
   padding: 8px 15px;
   cursor: pointer;
-  border: 1px solid #007bff;
-  background-color: #007bff;
+  border: 1px solid #023970;
+  background-color: #023970;
   color: white;
   border-radius: 4px;
   transition: all 0.2s ease;
@@ -546,7 +601,7 @@ button:disabled {
 }
 
 .modal-content {
-  background-color: white;
+  background-color: rgb(45, 44, 44);
   padding: 30px;
   border-radius: 8px;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
@@ -559,7 +614,7 @@ button:disabled {
   margin-top: 0;
   margin-bottom: 20px;
   text-align: center;
-  color: #333;
+  color: #ffffff;
 }
 
 .form-group {
@@ -570,7 +625,7 @@ button:disabled {
   display: block;
   margin-bottom: 5px;
   font-weight: 500;
-  color: #555;
+  color: #ffffff;
 }
 
 .form-group input[type='text'],
@@ -578,7 +633,7 @@ button:disabled {
 .form-group input[type='password'] {
   width: 100%;
   padding: 10px;
-  border: 1px solid #ddd;
+  border: 1px solid #ffffff;
   border-radius: 4px;
   box-sizing: border-box;
   font-size: 1rem;

@@ -37,7 +37,8 @@ namespace web_kursachsem4.Web
                                    "https://localhost:8080",
                                    "https://localhost:80",
                                    "https://localhost:5222",
-                                   "https://soniklvl.win"
+                                   "https://soniklvl.win", 
+                                   "http://localhost:5173"
                                )
                                .AllowAnyMethod()
                                .AllowAnyHeader(); 

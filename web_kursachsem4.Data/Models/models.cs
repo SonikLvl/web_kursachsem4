@@ -48,4 +48,21 @@ namespace web_kursachsem4.Data.Models
         // Навігаційна властивість
         public virtual User User { get; set; }
     }
+    public class EditScoreResult
+    {
+        // Чи було рахунок фактично оновлено або створено в результаті цього виклику
+        public bool UpdatedOrCreated { get; set; }
+
+        // Фінальне значення рахунку після виконання операції (новий рахунок, якщо оновлено/створено, або старий, якщо не оновлено)
+        public int FinalScore { get; set; }
+
+        // Повідомлення про результат операції (наприклад, "Рахунок оновлено", "Рахунок не оновлено, оскільки не більший", "Створено новий запис")
+        public string StatusMessage { get; set; }
+
+        // Значення рахунку до виконання операції (null, якщо запис був створений)
+        public int? PreviousScore { get; set; }
+
+        // Значення рахунку, яке намагалися встановити
+        public int AttemptedScore { get; set; }
+    }
 }
