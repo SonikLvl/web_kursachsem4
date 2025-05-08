@@ -403,7 +403,6 @@ onMounted(async () => { // Робимо async, щоб використовува
           </div>
           <p v-if="loginError" class="error-message">{{ loginError }}</p>
           <div class="form-actions">
-            <button type="button" class="forgot-password-button" @click="handleForgotPassword" :disabled="isLoading">Забули пароль?</button>
             <button type="button" @click="closeModals" :disabled="isLoading">Скасувати</button>
             <button type="submit" :disabled="isLoading || !loginForm.username || !loginForm.password">
               {{ isLoading ? 'Вхід...' : 'Увійти' }}
