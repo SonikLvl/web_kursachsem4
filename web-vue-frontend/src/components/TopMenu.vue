@@ -1,354 +1,334 @@
 <script setup lang="ts">
-import { ref, reactive, watch, onMounted, computed, onUnmounted } from 'vue';
-import UserService from '@/services/userService';
-import type { ILoginResponse, ICreatedUser, ILoginCredentials } from '@/services/userService';
-import axios from 'axios';
-
+import { ref, reactive, watch, onMounted, computed, onUnmounted } from 'vue'
+import UserService from '@/services/userService'
+import type { ILoginResponse, ICreatedUser, ILoginCredentials } from '@/services/userService'
+import axios from 'axios'
 
 interface ApiError extends Error {
-  message: string;
-  statusCode?: number;
+  message: string
+  statusCode?: number
 }
 
 // --- Стани компонента ---
-const isLoggedIn = ref(false);
-const currentUsername = ref<string | null>(null);
-const currentEmail = ref<string | null>(null);
-const isLoading = ref(false);
-const userService = new UserService();
+const isLoggedIn = ref(false)
+const currentUsername = ref<string | null>(null)
+const currentEmail = ref<string | null>(null)
+const isLoading = ref(false)
+const userService = new UserService()
 
-const showLoginModal = ref(false);
-const showSignupModal = ref(false);
-const showProfileDetails = ref<boolean>(false);
+const showLoginModal = ref(false)
+const showSignupModal = ref(false)
+const showProfileDetails = ref<boolean>(false)
 
 const loginForm = reactive({
-  username: '',
-  password: '',
-});
+  username: '',
+  password: '',
+})
 
 const signupForm = reactive({
-  username: '',
-  email: '',
-  password: '',
-});
+  username: '',
+  email: '',
+  password: '',
+})
 
-const createUserError = ref<string | null>(null);
-const createdUserMessage = ref<string | null>(null);
-const loginError = ref<string | null>(null);
+const createUserError = ref<string | null>(null)
+const createdUserMessage = ref<string | null>(null)
+const loginError = ref<string | null>(null)
 
 // --- Новий стан для відстеження, чи Unity завантажено і доступно ---
-const unityLoaded = ref(false);
+const unityLoaded = ref(false)
 // ВИПРАВЛЕННЯ: Прибираємо явне ': number | null', щоб уникнути проблем з типами Node.js/браузера
 // Або використовуємо 'any' для простоти, щоб TypeScript не сварився
-let unityCheckTimer: any = null;
-
+let unityCheckTimer: any = null
 
 // --- Функції ---
 const closeModals = () => {
-  showLoginModal.value = false;
-  showSignupModal.value = false;
-  showProfileDetails.value = false; // Важливо скидати всі стани модалок
-  loginError.value = null;
-  createUserError.value = null;
-  createdUserMessage.value = null;
-};
+  showLoginModal.value = false
+  showSignupModal.value = false
+  showProfileDetails.value = false // Важливо скидати всі стани модалок
+  loginError.value = null
+  createUserError.value = null
+  createdUserMessage.value = null
+}
 
 const resetForms = () => {
-  Object.assign(loginForm, { username: '', password: '' });
-  Object.assign(signupForm, { username: '', email: '', password: '' });
-};
+  Object.assign(loginForm, { username: '', password: '' })
+  Object.assign(signupForm, { username: '', email: '', password: '' })
+}
 
 // --- Функція для надсилання команди паузи/відновлення до Unity ---
 // Винесено в окрему функцію для чистоти
 const sendUnityPauseState = (isPaused: boolean) => {
-  const unityInstance = (window as any).unityInstance; // Знову отримуємо інстанс
+  const unityInstance = (window as any).unityInstance // Знову отримуємо інстанс
 
-  if (unityInstance) {
-    console.log(`[Vue -> Unity] Надсилаємо повідомлення: 'SetPaused', ${isPaused ? 1 : 0}`);
-    try {
-      // ПЕРЕКОНАЙТЕСЯ, ЩО "GameManager" І "SetPaused" ПОВНІСТЮ ВІДПОВІДАЮТЬ
-      // НАЗВІ ВАШОГО UNITY GAMEOBJECT ТА C# ФУНКЦІЇ.
-      unityInstance.SendMessage('StopGameManager', 'SetPaused', isPaused ? 1 : 0); // Передаємо 1 для паузи (true), 0 для відновлення (false)
-
-    } catch (e) {
-       console.error("[Vue -> Unity] Помилка під час відправки повідомлення до Unity:", e);
-       // Якщо сталася помилка, це може бути через невірні назви, або Unity ще не повністю готовий
-    }
-  } else {
-     console.warn("[Vue -> Unity] Екземпляр Unity ще не доступний. Повідомлення про паузу не відправлено.");
-  }
-};
-
+  if (unityInstance) {
+    console.log(`[Vue -> Unity] Надсилаємо повідомлення: 'SetPaused', ${isPaused ? 1 : 0}`)
+    try {
+      // ПЕРЕКОНАЙТЕСЯ, ЩО "GameManager" І "SetPaused" ПОВНІСТЮ ВІДПОВІДАЮТЬ
+      // НАЗВІ ВАШОГО UNITY GAMEOBJECT ТА C# ФУНКЦІЇ.
+      unityInstance.SendMessage('StopGameManager', 'SetPaused', isPaused ? 1 : 0) // Передаємо 1 для паузи (true), 0 для відновлення (false)
+    } catch (e) {
+      console.error('[Vue -> Unity] Помилка під час відправки повідомлення до Unity:', e) // Якщо сталася помилка, це може бути через невірні назви, або Unity ще не повністю готовий
+    }
+  } else {
+    console.warn(
+      '[Vue -> Unity] Екземпляр Unity ще не доступний. Повідомлення про паузу не відправлено.',
+    )
+  }
+}
 
 // --- Обчислюване властивість, що відстежує, чи відкрита хоча б одна модалка ---
 const isAnyModalOpen = computed(() => {
-  return showLoginModal.value || showSignupModal.value || showProfileDetails.value;
-});
+  return showLoginModal.value || showSignupModal.value || showProfileDetails.value
+})
 
 // --- Watcher для виклику паузи/відновлення, коли змінюється стан модалок ---
 // Тепер цей watcher просто викликає функцію відправки
 watch(isAnyModalOpen, (isOpen) => {
-    sendUnityPauseState(isOpen);
-});
-
+  sendUnityPauseState(isOpen)
+})
 
 // --- Функція для періодичної перевірки, чи завантажився Unity ---
 const checkUnityLoaded = () => {
-  const unityInstance = (window as any).unityInstance;
-  if (unityInstance) {
-    console.log("[Vue] Unity Instance знайдено!");
-    unityLoaded.value = true;
-    if (unityCheckTimer !== null) {
-      clearInterval(unityCheckTimer); // Зупиняємо таймер, якщо Unity знайдено
-      unityCheckTimer = null;
-    }
+  const unityInstance = (window as any).unityInstance
+  if (unityInstance) {
+    console.log('[Vue] Unity Instance знайдено!')
+    unityLoaded.value = true
+    if (unityCheckTimer !== null) {
+      clearInterval(unityCheckTimer) // Зупиняємо таймер, якщо Unity знайдено
+      unityCheckTimer = null
+    } // *** ВАЖЛИВО ***
+    // Як тільки Unity завантажено, відправляємо поточний стан модалок.
+    // Це потрібно, щоб Unity "знав" про стан модалок, якщо вони були відкриті
+    // до повного завантаження Unity.
 
-    // *** ВАЖЛИВО ***
-    // Як тільки Unity завантажено, відправляємо поточний стан модалок.
-    // Це потрібно, щоб Unity "знав" про стан модалок, якщо вони були відкриті
-    // до повного завантаження Unity.
-    sendUnityPauseState(isAnyModalOpen.value);
-
-  } else {
-    console.log("[Vue] Unity Instance поки не знайдено, чекаємо...");
-   }
-};
-
+    sendUnityPauseState(isAnyModalOpen.value)
+  } else {
+    console.log('[Vue] Unity Instance поки не знайдено, чекаємо...')
+  }
+}
 
 // --- Життєвий цикл: при монтуванні компонента ---
 onMounted(async () => {
-  // ... (ваш існуючий код перевірки авторизації) ...
+  // ... (ваш існуючий код перевірки авторизації) ...
 
-  // Закриваємо модалки при монтуванні. Це ініціює watcher, який спробує
-  // відправити команду відновлення (якщо Unity готовий) або виведе попередження.
-  closeModals();
+  // Закриваємо модалки при монтуванні. Це ініціює watcher, який спробує
+  // відправити команду відновлення (якщо Unity готовий) або виведе попередження.
+  closeModals() // Запускаємо періодичну перевірку завантаження Unity
+  // Перевіряємо одразу при монтуванні
 
-  // Запускаємо періодичну перевірку завантаження Unity
-  // Перевіряємо одразу при монтуванні
-  checkUnityLoaded();
-  // Потім запускаємо таймер для регулярних перевірок, якщо Unity одразу не знайшли
-  if (!unityLoaded.value) {
-      unityCheckTimer = setInterval(checkUnityLoaded, 500); // Перевіряємо кожні 500 мс
-   }
-});
+  checkUnityLoaded() // Потім запускаємо таймер для регулярних перевірок, якщо Unity одразу не знайшли
+  if (!unityLoaded.value) {
+    unityCheckTimer = setInterval(checkUnityLoaded, 500) // Перевіряємо кожні 500 мс
+  }
+})
 
 // --- Життєвий цикл: при демонтажі компонента ---
 // Очищаємо таймер, щоб уникнути витоків пам'яті
 onUnmounted(() => {
-  if (unityCheckTimer !== null) {
-    clearInterval(unityCheckTimer);
-    unityCheckTimer = null;
-  }
-});
-
+  if (unityCheckTimer !== null) {
+    clearInterval(unityCheckTimer)
+    unityCheckTimer = null
+  }
+})
 
 // --- Вхід користувача ---
 const handleLogin = async () => {
-   if (!loginForm.username || !loginForm.password) {
-     loginError.value = "Будь ласка, введіть ім'я користувача та пароль.";
-     return;
-   }
-   isLoading.value = true;
-   loginError.value = null;
+  if (!loginForm.username || !loginForm.password) {
+    loginError.value = "Будь ласка, введіть ім'я користувача та пароль."
+    return
+  }
+  isLoading.value = true
+  loginError.value = null
 
-   currentUsername.value = null;
-   currentEmail.value = null;
-   isLoggedIn.value = false;
-   localStorage.removeItem('authToken');
-   delete axios.defaults.headers.common['Authorization'];
+  currentUsername.value = null
+  currentEmail.value = null
+  isLoggedIn.value = false
+  localStorage.removeItem('authToken')
+  delete axios.defaults.headers.common['Authorization']
 
-   try {
-     const credentialsToSend: ILoginCredentials = {
-       Username: loginForm.username,
-       Password: loginForm.password
-     };
-     const loginResponse: ILoginResponse = await userService.login(credentialsToSend);
+  try {
+    const credentialsToSend: ILoginCredentials = {
+      Username: loginForm.username,
+      Password: loginForm.password,
+    }
+    const loginResponse: ILoginResponse = await userService.login(credentialsToSend)
 
-     if (!loginResponse.token) {
-         throw new Error("Не отримано токен авторизації після входу.");
-     }
-     localStorage.setItem('authToken', loginResponse.token);
-     axios.defaults.headers.common['Authorization'] = `Bearer ${loginResponse.token}`;
+    if (!loginResponse.token) {
+      throw new Error('Не отримано токен авторизації після входу.')
+    }
+    localStorage.setItem('authToken', loginResponse.token)
+    axios.defaults.headers.common['Authorization'] = `Bearer ${loginResponse.token}`
 
+    try {
+      const username = await userService.getCurrentUser() // Отримуємо ім'я
+      const email = await userService.getCurrentEmail() // Отримуємо email
 
-      try {
+      currentUsername.value = username
+      currentEmail.value = email // Зберігаємо отриманий email
+      isLoggedIn.value = true
+      console.log("Успішний вхід та отримання даних користувача (ім'я та email).")
+    } catch (profileError) {
+      console.error('Помилка отримання даних користувача після входу:', profileError) // Вважаємо помилкою логіну, якщо не вдалося отримати дані профілю після токена
+      localStorage.removeItem('authToken')
+      delete axios.defaults.headers.common['Authorization']
+      isLoggedIn.value = false
+      currentUsername.value = null
+      currentEmail.value = null
+      throw new Error(
+        `Вхід успішний, але не вдалося завантажити дані користувача: ${(profileError as Error).message || 'Невідома помилка.'}`,
+      )
+    }
 
-         const username = await userService.getCurrentUser(); // Отримуємо ім'я
-         const email = await userService.getCurrentEmail(); // Отримуємо email
-
-         currentUsername.value = username;
-         currentEmail.value = email; // Зберігаємо отриманий email
-         isLoggedIn.value = true;
-         console.log('Успішний вхід та отримання даних користувача (ім\'я та email).');
-
-      } catch(profileError) {
-         console.error('Помилка отримання даних користувача після входу:', profileError);
-         // Вважаємо помилкою логіну, якщо не вдалося отримати дані профілю після токена
-         localStorage.removeItem('authToken');
-         delete axios.defaults.headers.common['Authorization'];
-         isLoggedIn.value = false;
-         currentUsername.value = null;
-         currentEmail.value = null;
-         throw new Error(`Вхід успішний, але не вдалося завантажити дані користувача: ${ (profileError as Error).message || 'Невідома помилка.'}`);
-      }
-
-     resetForms();
-     closeModals();
-
-   } catch (error) {
-     const err = error as ApiError;
-     console.error('Помилка входу:', err);
-     loginError.value = err.message || 'Сталася невідома помилка під час входу.';
-      isLoggedIn.value = false;
-      currentUsername.value = null;
-      currentEmail.value = null; // Очищаємо email
-      localStorage.removeItem('authToken');
-      delete axios.defaults.headers.common['Authorization'];
-   } finally {
-     isLoading.value = false;
-   }
-};
+    resetForms()
+    closeModals()
+  } catch (error) {
+    const err = error as ApiError
+    console.error('Помилка входу:', err)
+    loginError.value = err.message || 'Сталася невідома помилка під час входу.'
+    isLoggedIn.value = false
+    currentUsername.value = null
+    currentEmail.value = null // Очищаємо email
+    localStorage.removeItem('authToken')
+    delete axios.defaults.headers.common['Authorization']
+  } finally {
+    isLoading.value = false
+  }
+}
 
 // --- Реєстрація користувача ---
 const handleSignup = async () => {
-   if (!signupForm.username.trim() || !signupForm.email.trim() || !signupForm.password.trim()) {
-     createUserError.value = "Всі поля реєстрації обов'язкові.";
-     return;
-   }
-   if (signupForm.password.length < 6) {
-     createUserError.value = "Пароль повинен містити щонайменше 6 символів.";
-     return;
-   }
+  if (!signupForm.username.trim() || !signupForm.email.trim() || !signupForm.password.trim()) {
+    createUserError.value = "Всі поля реєстрації обов'язкові."
+    return
+  }
+  if (signupForm.password.length < 6) {
+    createUserError.value = 'Пароль повинен містити щонайменше 6 символів.'
+    return
+  }
 
-  isLoading.value = true;
-  createUserError.value = null;
-  createdUserMessage.value = null;
+  isLoading.value = true
+  createUserError.value = null
+  createdUserMessage.value = null
 
-  try {
-    const createdUserData: ICreatedUser = await userService.createUser({
-      UserName: signupForm.username,
-      Email: signupForm.email,
-      Password: signupForm.password
-    });
+  try {
+    const createdUserData: ICreatedUser = await userService.createUser({
+      UserName: signupForm.username,
+      Email: signupForm.email,
+      Password: signupForm.password,
+    })
 
-    createdUserMessage.value = `Ласкаво просимо, ${createdUserData.UserName}! Реєстрація успішна. Тепер ви можете увійти.`;
-    resetForms();
+    createdUserMessage.value = `Ласкаво просимо, ${createdUserData.UserName}! Реєстрація успішна. Тепер ви можете увійти.`
+    resetForms()
 
-    showSignupModal.value = false;
-    showLoginModal.value = true;
-
-  } catch (error) {
-    const err = error as ApiError;
-    console.error('Помилка реєстрації:', err);
-    createUserError.value = `Не вдалося зареєструватися: ${err.message || 'Невідома помилка'}`;
-  } finally {
-    isLoading.value = false;
-  }
-};
+    showSignupModal.value = false
+    showLoginModal.value = true
+  } catch (error) {
+    const err = error as ApiError
+    console.error('Помилка реєстрації:', err)
+    createUserError.value = `Не вдалося зареєструватися: ${err.message || 'Невідома помилка'}`
+  } finally {
+    isLoading.value = false
+  }
+}
 
 // --- Вихід користувача ---
 const handleLogout = async () => {
-    isLoading.value = true;
+  isLoading.value = true
 
-    try {
+  try {
+    localStorage.removeItem('authToken')
+    delete axios.defaults.headers.common['Authorization']
 
-
-      localStorage.removeItem('authToken');
-      delete axios.defaults.headers.common['Authorization'];
-
-      isLoggedIn.value = false;
-      currentUsername.value = null; // Скидаємо ім'я користувача
-      currentEmail.value = null; // Скидаємо email
-      resetForms();
-      closeModals();
-      console.log('User logged out.');
-
-    } catch (error) {
-      const err = error as ApiError;
-      console.error('Помилка виходу:', err);
-      localStorage.removeItem('authToken');
-      delete axios.defaults.headers.common['Authorization'];
-      isLoggedIn.value = false;
-      currentUsername.value = null;
-      currentEmail.value = null; // Скидаємо email
-      resetForms();
-      closeModals();
-      alert(`Помилка виходу: ${err.message || 'Не вдалося вийти коректно. Стан очищено.'}`);
-    } finally {
-      isLoading.value = false;
-    }
-};
-
+    isLoggedIn.value = false
+    currentUsername.value = null // Скидаємо ім'я користувача
+    currentEmail.value = null // Скидаємо email
+    resetForms()
+    closeModals()
+    console.log('User logged out.')
+  } catch (error) {
+    const err = error as ApiError
+    console.error('Помилка виходу:', err)
+    localStorage.removeItem('authToken')
+    delete axios.defaults.headers.common['Authorization']
+    isLoggedIn.value = false
+    currentUsername.value = null
+    currentEmail.value = null // Скидаємо email
+    resetForms()
+    closeModals()
+    alert(`Помилка виходу: ${err.message || 'Не вдалося вийти коректно. Стан очищено.'}`)
+  } finally {
+    isLoading.value = false
+  }
+}
 
 // --- Відновлення пароля ---
 const handleForgotPassword = async () => {
-  alert('Функціонал відновлення пароля ще не реалізовано.');
-};
-
+  alert('Функціонал відновлення пароля ще не реалізовано.')
+}
 
 // --- Видалення акаунту ---
 const handleDeleteAccount = async () => {
-   if (!isLoggedIn.value || !currentUsername.value) {
-      console.warn('Спроба видалити акаунт без автентифікації.');
-      alert('Ви не увійшли. Неможливо видалити акаунт.');
-      return;
-   }
+  if (!isLoggedIn.value || !currentUsername.value) {
+    console.warn('Спроба видалити акаунт без автентифікації.')
+    alert('Ви не увійшли. Неможливо видалити акаунт.')
+    return
+  }
 
-   if (!confirm(`Ви ВПЕВНЕНІ, що хочете видалити акаунт "${currentUsername.value}"? Цю дію неможливо скасувати.`)) {
-     return;
-   }
+  if (
+    !confirm(
+      `Ви ВПЕВНЕНІ, що хочете видалити акаунт "${currentUsername.value}"? Цю дію неможливо скасувати.`,
+    )
+  ) {
+    return
+  }
 
-   isLoading.value = true;
+  isLoading.value = true
 
-   try {
-      await userService.deleteAccount();
+  try {
+    await userService.deleteAccount()
 
-      console.log('Акаунт успішно видалено на бекенді.');
-      alert('Ваш акаунт успішно видалено.');
+    console.log('Акаунт успішно видалено на бекенді.')
+    alert('Ваш акаунт успішно видалено.')
 
-      handleLogout();
-
-   } catch (error) {
-      const err = error as ApiError;
-      console.error('Помилка видалення акаунту:', err);
-      alert(`Помилка видалення акаунту: ${err.message || 'Невідома помилка'}`);
-
-   } finally {
-      isLoading.value = false;
-      closeModals(); // Закриваємо модалку профілю після спроби видалення
-   }
-};
-
+    handleLogout()
+  } catch (error) {
+    const err = error as ApiError
+    console.error('Помилка видалення акаунту:', err)
+    alert(`Помилка видалення акаунту: ${err.message || 'Невідома помилка'}`)
+  } finally {
+    isLoading.value = false
+    closeModals() // Закриваємо модалку профілю після спроби видалення
+  }
+}
 
 // --- Перевірка стану авторизації при завантаженні компонента ---
-onMounted(async () => { // Робимо async, щоб використовувати await
-  const token = localStorage.getItem('authToken');
-  if (token) {
-    console.log('Знайдено токен, спроба відновити сесію...');
-    axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+onMounted(async () => {
+  // Робимо async, щоб використовувати await
+  const token = localStorage.getItem('authToken')
+  if (token) {
+    console.log('Знайдено токен, спроба відновити сесію...')
+    axios.defaults.headers.common['Authorization'] = `Bearer ${token}`
 
-    try {
-        // Отримуємо ім'я та email при відновленні сесії
-        const username = await userService.getCurrentUser();
-        const email = await userService.getCurrentEmail();
+    try {
+      // Отримуємо ім'я та email при відновленні сесії
+      const username = await userService.getCurrentUser()
+      const email = await userService.getCurrentEmail()
 
-        currentUsername.value = username;
-        currentEmail.value = email; // Зберігаємо отриманий email
-        isLoggedIn.value = true;
-        console.log('Сесію відновлено (отримано ім\'я та email користувача).');
-
-    } catch (error) {
-      console.error('Не вдалося відновити сесію:', error);
-      localStorage.removeItem('authToken');
-      delete axios.defaults.headers.common['Authorization'];
-      isLoggedIn.value = false;
-      currentUsername.value = null;
-      currentEmail.value = null; // Очищаємо email
-    }
-  }
-  
-});
-
+      currentUsername.value = username
+      currentEmail.value = email // Зберігаємо отриманий email
+      isLoggedIn.value = true
+      console.log("Сесію відновлено (отримано ім'я та email користувача).")
+    } catch (error) {
+      console.error('Не вдалося відновити сесію:', error)
+      localStorage.removeItem('authToken')
+      delete axios.defaults.headers.common['Authorization']
+      isLoggedIn.value = false
+      currentUsername.value = null
+      currentEmail.value = null // Очищаємо email
+    }
+  }
+})
 </script>
 
 <template>
@@ -360,13 +340,13 @@ onMounted(async () => { // Робимо async, щоб використовува
     <div v-if="isLoggedIn && currentUsername" class="greeting">
       {{ currentUsername }}
     </div>
-    <div v-else class="greeting">
-      Ви не увійшли
-    </div>
+    <div v-else class="greeting">Ви не увійшли</div>
 
     <div class="menu-actions">
       <template v-if="isLoggedIn">
-        <button @click="showProfileDetails = true" :disabled="!isLoggedIn || isLoading">Мій профіль</button>
+        <button @click="showProfileDetails = true" :disabled="!isLoggedIn || isLoading">
+          Мій профіль
+        </button>
         <button @click="handleLogout" :disabled="isLoading">Вийти</button>
       </template>
       <template v-else>
@@ -404,7 +384,10 @@ onMounted(async () => { // Робимо async, щоб використовува
           <p v-if="loginError" class="error-message">{{ loginError }}</p>
           <div class="form-actions">
             <button type="button" @click="closeModals" :disabled="isLoading">Скасувати</button>
-            <button type="submit" :disabled="isLoading || !loginForm.username || !loginForm.password">
+            <button
+              type="submit"
+              :disabled="isLoading || !loginForm.username || !loginForm.password"
+            >
               {{ isLoading ? 'Вхід...' : 'Увійти' }}
             </button>
           </div>
@@ -430,7 +413,7 @@ onMounted(async () => { // Робимо async, щоб використовува
           <div class="form-group">
             <label for="signup-email">Email:</label>
             <input
-              type="text"
+              type="email"
               id="signup-email"
               v-model="signupForm.email"
               required
@@ -454,7 +437,16 @@ onMounted(async () => { // Робимо async, щоб використовува
           <p v-if="createdUserMessage" class="success-message">{{ createdUserMessage }}</p>
           <div class="form-actions">
             <button type="button" @click="closeModals" :disabled="isLoading">Скасувати</button>
-            <button type="submit" :disabled="isLoading || !signupForm.username || !signupForm.email || !signupForm.password || signupForm.password.length < 6">
+            <button
+              type="submit"
+              :disabled="
+                isLoading ||
+                !signupForm.username ||
+                !signupForm.email ||
+                !signupForm.password ||
+                signupForm.password.length < 6
+              "
+            >
               {{ isLoading ? 'Реєстрація...' : 'Зареєструватися' }}
             </button>
           </div>
@@ -463,32 +455,38 @@ onMounted(async () => { // Робимо async, щоб використовува
     </div>
 
     <div v-if="showProfileDetails" class="modal-overlay" @click.self="closeModals">
-  <div class="modal-content profile-card">
-    <h3>Мій профіль</h3>
+      <div class="modal-content profile-card">
+        <h3>Мій профіль</h3>
 
-    <div class="profile-info">
-      <div class="avatar-circle">
-        <span>{{ currentUsername?.charAt(0).toUpperCase() || 'U' }}</span>
-      </div>
-      <div class="profile-details">
-        <p><strong>Ім'я користувача:</strong> {{ currentUsername || 'Невідомо' }}</p>
-        <p><strong>Email:</strong> {{ currentEmail || 'Невідомо' }}</p>
+        <div class="profile-info">
+          <div class="avatar-circle">
+            <span>{{ currentUsername?.charAt(0).toUpperCase() || 'U' }}</span>
+          </div>
+          <div class="profile-details">
+            <p><strong>Ім'я користувача:</strong> {{ currentUsername || 'Невідомо' }}</p>
+            <p><strong>Email:</strong> {{ currentEmail || 'Невідомо' }}</p>
+          </div>
+        </div>
+
+        <p v-if="!currentUsername && !currentEmail" class="error-message">
+          Не вдалося завантажити дані профілю.
+        </p>
+
+        <div class="form-actions">
+          <button
+            type="button"
+            class="delete-button"
+            @click="handleDeleteAccount"
+            :disabled="isLoading"
+          >
+            Видалити акаунт
+          </button>
+          <button type="button" @click="closeModals" :disabled="isLoading">Закрити</button>
+        </div>
       </div>
     </div>
-
-    <p v-if="!currentUsername && !currentEmail" class="error-message">Не вдалося завантажити дані профілю.</p>
-
-    <div class="form-actions">
-      <button type="button" class="delete-button" @click="handleDeleteAccount" :disabled="isLoading">Видалити акаунт</button>
-      <button type="button" @click="closeModals" :disabled="isLoading">Закрити</button>
-    </div>
-  </div>
-</div>
-
   </div>
 </template>
-
-
 
 <style scoped>
 .profile-card {
@@ -515,7 +513,7 @@ onMounted(async () => { // Робимо async, щоб використовува
   justify-content: center;
   align-items: center;
   border-radius: 50%;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
 }
 
 .profile-details p {
@@ -584,7 +582,6 @@ button:disabled {
   opacity: 0.7;
   cursor: not-allowed;
 }
-
 
 .modal-overlay {
   position: fixed;
@@ -729,8 +726,12 @@ button:disabled {
 }
 
 @keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
 }
 
 /* Адаптивность */
@@ -740,25 +741,25 @@ button:disabled {
     gap: 10px;
     padding: 10px;
   }
-  
+
   .menu-actions {
     width: 100%;
     justify-content: center;
   }
-  
+
   .modal-content {
     padding: 20px;
   }
-  
+
   .form-actions {
     flex-direction: column;
     gap: 8px;
   }
-  
+
   .form-actions button {
     width: 100%;
   }
-  
+
   .form-actions button.delete-button {
     order: 1;
     margin-right: 0;

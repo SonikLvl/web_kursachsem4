@@ -29,9 +29,6 @@ namespace web_kursachsem4.Services
 
 
         Task<Score[]> GetLeaderBoard();
-
-        Task<bool[]?> GetLevelAsync(int userId); // Може повернути null
-        Task EditLevelAsync(int userId, string lvl);
         Task<User?> AuthenticateUserAsync(string username, string password); // Повертає User при успіху, null при невдачі
     }
 
@@ -117,15 +114,13 @@ namespace web_kursachsem4.Services
 
             // Тепер user.UserId має значення, можна створювати залежні записи
             var initialScore = new Score { UserId = user.UserId, UserName = user.UserName, ScoreValue = 0 };
-            var initialLevels = new Levels { UserId = user.UserId, CompletedLevels = "f,f,f,f,f,f,f,f,f,f,f,f,f,f,f,f,f,f,f,f" }; // Припускаємо, User = user не потрібен, якщо UserId є FK
-
+           
 
             _db.Scores.Add(initialScore);
-            _db.Levels.Add(initialLevels);
 
             await _db.SaveChangesAsync(); // Зберігаємо залежні записи
 
-            _logger.LogInformation("User '{Username}' (ID: {UserId}) and initial score/levels created successfully.", user.UserName, user.UserId);
+            _logger.LogInformation("User '{Username}' (ID: {UserId}) and initial score created successfully.", user.UserName, user.UserId);
 
             return user; // Повертаємо доданого користувача
         }
@@ -141,15 +136,7 @@ namespace web_kursachsem4.Services
                 throw new NotFoundException(nameof(User), userId);
             }
 
-            // Якщо каскадне видалення налаштоване в моделі/контексті БД для зв'язку User -> Score/Levels,
-            // то видалення User автоматично видалить пов'язані записи.
-            // Якщо ні, потрібно видалити їх вручну ПЕРЕД видаленням User.
-            // Приклад ручного видалення (якщо каскадне видалення НЕ налаштоване):
-            // var scoreToDelete = await _db.Scores.FirstOrDefaultAsync(s => s.UserId == userId);
-            // if (scoreToDelete != null) _db.Scores.Remove(scoreToDelete);
-            // var lvlToDelete = await _db.Levels.FirstOrDefaultAsync(l => l.UserId == userId);
-            // if (lvlToDelete != null) _db.Levels.Remove(lvlToDelete);
-
+            //  каскадне видалення налаштоване в моделі/контексті БД для зв'язку User -> Score,
 
             _db.Users.Remove(userToDelete); // Видаляємо користувача
             await _db.SaveChangesAsync(); // Зберігаємо зміни (включно з каскадними, якщо налаштовані)
@@ -340,75 +327,6 @@ namespace web_kursachsem4.Services
 
             _logger.LogInformation("Fetched {Count} leaderboard entries.", leaderBord.Length);
             return leaderBord;
-        }
-
-        // --- Level Methods ---
-
-        public async Task EditLevelAsync(int userId, string lvl)
-        {
-            _logger.LogInformation("Attempting to edit level for user ID: {UserId} with value: {LevelValue}.", userId, lvl);
-            var lvlToUpdate = await _db.Levels.FindAsync(userId); // Припускаємо userId є PK для Level
-
-            if (lvlToUpdate == null)
-            {
-                // Аналогічно до EditScore, перевіряємо User або кидаємо виняток
-                var userExists = await _db.Users.AnyAsync(u => u.UserId == userId);
-                if (!userExists)
-                {
-                    _logger.LogWarning("Cannot create level record: User with ID {UserId} not found in Users table.", userId);
-                    throw new NotFoundException(nameof(User), userId);
-                }
-                _logger.LogWarning("Level record not found for user ID: {UserId}.", userId);
-                throw new NotFoundException(nameof(Levels), userId); // Запис рівня не знайдено, хоча користувач існує
-            }
-
-            if (string.IsNullOrEmpty(lvl)) // Перевірка на null або порожній рядок
-            {
-                _logger.LogWarning("Attempted to set empty or null level string for user ID: {UserId}.", userId);
-                throw new ArgumentNullException(nameof(lvl));
-            }
-
-            // Припускаємо, що логіка гри гарантує коректний формат рядка `lvl`
-            // Якщо формат може бути неправильним, тут варто додати валідацію рядка `lvl`
-
-            lvlToUpdate.CompletedLevels = lvl; // Припускаємо, що поле називається CompletedLevels
-            await _db.SaveChangesAsync();
-            _logger.LogInformation("Level updated for user ID: {UserId} to {LevelValue}.", userId, lvl);
-        }
-
-        public async Task<bool[]?> GetLevelAsync(int userId)
-        {
-            _logger.LogInformation("Attempting to get levels for user ID: {UserId}.", userId);
-            // Оптимізація через Select
-            string? levelsString = await _db.Levels
-                .Where(l => l.UserId == userId) // Припускаючи userId - це ключ або FK
-                .Select(l => l.CompletedLevels)
-                .FirstOrDefaultAsync(); // Використовуйте FirstOrDefaultAsync для nullable результату
-
-            // Поверне null, якщо запис Level не знайдено
-            if (levelsString == null)
-            {
-                _logger.LogInformation("Level record not found for user ID: {UserId}. Returning null.", userId);
-                return null;
-            }
-
-            // Обробка отриманого рядка
-            // Перевірка на null додана вище, тому levelsString точно не null тут
-            try
-            {
-                // Ваша поточна логіка обробки рядка
-                levelsString = levelsString.TrimEnd('}').TrimStart('{').Replace("f", "false").Replace("t", "true");
-                var boolArray = levelsString.Split(',').Select(n => Convert.ToBoolean(n)).ToArray();
-                _logger.LogInformation("Successfully parsed levels for user ID: {UserId}. Found {Count} levels.", userId, boolArray.Length);
-                return boolArray;
-            }
-            catch (Exception ex)
-            {
-                // Обробка помилок парсингу, якщо формат рядка CompletedLevels неочікуваний
-                _logger.LogError(ex, "Error parsing levels string '{LevelsString}' for user ID: {UserId}.", levelsString, userId);
-                // Залежно від вимог, можна кинути виняток, повернути null або порожній масив
-                throw new InvalidOperationException($"Failed to parse levels string for user ID {userId}.", ex);
-            }
         }
     }
 }

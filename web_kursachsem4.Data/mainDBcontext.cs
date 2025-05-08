@@ -15,7 +15,6 @@ namespace web_kursachsem4.Data
 
         public virtual DbSet<User> Users { get; set; }
         public virtual DbSet<Score> Scores { get; set; }
-        public virtual DbSet<Levels> Levels { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -35,12 +34,6 @@ namespace web_kursachsem4.Data
                 entity.HasOne(u => u.Score)
                       .WithOne(s => s.User)
                       .HasForeignKey<Score>(s => s.UserId);
-                
-
-                // User має один Levels, Levels має одного User, зовнішній ключ у Levels
-                entity.HasOne(u => u.Levels)
-                      .WithOne(l => l.User)
-                      .HasForeignKey<Levels>(l => l.UserId);
             });
 
             modelBuilder.Entity<Score>(entity =>
@@ -55,20 +48,6 @@ namespace web_kursachsem4.Data
                       .OnDelete(DeleteBehavior.Restrict);
             });
 
-            modelBuilder.Entity<Levels>(entity =>
-            {
-                entity.HasKey(l => l.UserId);
-
-                /*entity.Property(l => l.CompletedLevels)
-                     .HasConversion(
-                         v => JsonSerializer.Serialize(v, (JsonSerializerOptions)null),
-                         v => JsonSerializer.Deserialize<List<bool>>(v, (JsonSerializerOptions)null)
-                     )
-                     .IsRequired(); // Робимо поле обов'язковим, якщо логіка цього вимагає
-                                    */
-                 entity.Property(l => l.CompletedLevels).IsRequired();
-
-            });
         }
     }
 }
